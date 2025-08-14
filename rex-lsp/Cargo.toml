@@ -1,0 +1,9 @@
+[package]
+name = "rex-lsp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tower-lsp-server = "*"
+rex = { path = "../rex" }
+tokio = { version = "1.47.1", features = ["full", "tokio-macros"] }

@@ -2,4 +2,4 @@
 [workspace]
 resolver = "3"
 
-members = ["expr", "expr-lsp"]
+members = ["rex", "rex-core", "rex-lsp", "rex-parser"]

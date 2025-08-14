@@ -1,5 +1,5 @@
 [package]
-name = "expr"
+name = "rex"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,3 +9,5 @@ derive_more = { version = "2.0.1", features = ["deref", "deref_mut"] }
 either = "1.15.0"
 rand = "0.9.1"
 rustyline = "16.0.0"
+rex-parser = { path = "../rex-parser" }
+rex-core = { path = "../rex-core" }

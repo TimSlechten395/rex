@@ -1,6 +1,6 @@
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::lsp_types::*;
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 #[derive(Debug)]
 struct Backend {
@@ -10,6 +10,10 @@ struct Backend {
 impl LanguageServer for Backend {
     async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
+            server_info: Some(ServerInfo {
+                name: "rex language server".to_string(),
+                version: Some("0.1.0".to_string()),
+            }),
             capabilities: ServerCapabilities {
                 // Advertise a couple of features so the client knows what to ask for.
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -17,9 +21,25 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: vec![
+                                    SemanticTokenType::KEYWORD,
+                                    SemanticTokenType::VARIABLE,
+                                    SemanticTokenType::FUNCTION,
+                                    SemanticTokenType::STRING,
+                                ],
+                                token_modifiers: vec![SemanticTokenModifier::DECLARATION],
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
-            ..Default::default()
         })
     }
 
@@ -67,7 +87,7 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    async fn publish_todo_diagnostics(&self, uri: Url, text: String) {
+    async fn publish_todo_diagnostics(&self, uri: Uri, text: String) {
         let mut diagnostics = Vec::new();
         for (i, line) in text.lines().enumerate() {
             if let Some(col) = line.find("TODO") {
@@ -91,7 +111,9 @@ impl Backend {
 
 #[tokio::main]
 async fn main() {
-    // stdio transport; most editors can launch LSP servers this way
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
     let (service, socket) = LspService::new(|client| Backend { client });
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(service)

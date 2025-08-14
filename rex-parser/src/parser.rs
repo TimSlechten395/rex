@@ -3,55 +3,62 @@ use std::fmt::Display;
 use chumsky::prelude::*;
 use either::Either::{self, Right};
 
-use crate::{desugar::BuiltinOp, lexer::Token};
+use crate::lexer::Token;
 
 // Later all idents will become syntactic sugar for indices
 pub type Var = String;
 
-// This should have a case Common(Expr<SugarExpr>) but we keep it seperate for performance
+// This could have a variant Common(Expr<SugarExpr>). But we need lambda, pi and var seperate
+// anyway
 #[derive(Debug, Clone, PartialEq)]
-pub enum SugarExpr {
-    // --- Core Expressions (these largely mirror your final Expr, but use SugaredExpr for sub-nodes) ---
+pub enum SugarExpr<T> {
     Var(Var),
-    App(Box<SugarExpr>, Box<SugarExpr>), // Function application
-    Type,                                // Type universe U0, U1, etc.
-    Bool(bool),                          // Boolean literals
-    BoolTy,
-    Atom(String),       // Atom literals (e.g., 'hello)
-    Builtin(BuiltinOp), // Built-in operations (car, cdr, print, etc.)
-    Lambda(Var, Box<SugarExpr>, Box<SugarExpr>),
-    Ann(Box<SugarExpr>, Box<SugarExpr>),
+    App(T, T),    // Function application
+    Type,         // Type universe U0, U1, etc.
+    Atom(String), // Atom literals (e.g., 'hello)
+    Lambda(Var, T, T),
 
+    Ann(T, T),
     // Pi: (x : Nat) -> Vector Nat x
-    Pi(Var, Box<SugarExpr>, Box<SugarExpr>),
+    Pi(Var, T, T),
 
-    Sigma(Var, Box<SugarExpr>, Box<SugarExpr>),
+    Sigma(Var, T, T),
 
     // --- Syntactic Sugar Variants ---
 
     // Multi-argument Lambda (sugar for nested single-arg lambdas)
     // Example: `(lambda (x:T y:U) body)`
-    MultiLambda(Vec<(Var, SugarExpr)>, Box<SugarExpr>),
+    MultiLambda(Vec<(Var, T)>, T),
 
     // Multi-argument Pi Type (sugar for nested single-arg Pi types)
     // Example: `(Pi (x:T y:U) return_type)`
-    MultiPi(Vec<(Var, SugarExpr)>, Box<SugarExpr>),
+    MultiPi(Vec<(Var, T)>, T),
 
     // Multi-argument Sigma Type (sugar for nested single-arg Sigma types)
     // Example: `(Sigma (x:T y:U) body_type)`
-    MultiSigma(Vec<(Var, Box<SugarExpr>)>, Box<SugarExpr>),
+    MultiSigma(Vec<(Var, T)>, T),
 
     // Infinite Loop Sugar: `loop { body }`
-    Loop(Box<SugarExpr>),
+    Loop(T),
 
     // Let binding sugar: `let name : type = value in body`
-    LetIn(Var, Box<SugarExpr>, Box<SugarExpr>, Box<SugarExpr>),
+    LetIn(Var, T, T, T),
     // Pipe operator
-    Pipe(Box<SugarExpr>, Box<SugarExpr>),
+    Pipe(T, T),
+}
+
+// Span is outside because the root expr also has a span. Box is inside because the root expr
+// doesn't need to be boxed.
+type Spanned<T> = (T, SimpleSpan);
+pub struct SpannedSugarExpr(pub Spanned<SugarExpr<Box<SpannedSugarExpr>>>);
+
+pub fn full_parser<'a>()
+-> impl Parser<'a, &'a [Token], Vec<SpannedSugarExpr>, extra::Err<Rich<'a, Token>>> {
+    parser().separated_by(just(Token::SemiColon)).collect()
 }
 
 // TODO: Handle comments better
-pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SugarExpr, extra::Err<Rich<'a, Token>>> {
+pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SpannedSugarExpr, extra::Err<Rich<'a, Token>>> {
     let skip_comments = select! {Token::Comment(_)}.ignored().repeated();
     let just_skip_comments = |p| skip_comments.clone().ignore_then(just(p));
     recursive(|expr| {
@@ -59,8 +66,6 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SugarExpr, extra::Err<Rich<'
         // --- 1. Basic Tokens ---
         let basic = skip_comments.clone().ignore_then(select! {
         Token::Atom(name) => SugarExpr::Atom(name),
-        Token::Bool(b) => SugarExpr::Bool(b),
-        Token::BoolTy => SugarExpr::BoolTy,
         Token::Type =>  SugarExpr::Type,
         });
 
@@ -143,20 +148,6 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SugarExpr, extra::Err<Rich<'
         //     .then_ignore(just_skip_comments(Token::RParen))
         //     .map(|(val1, val2)| Expr::Pair(Box::new(val1), Box::new(val2)));
 
-        let builtins = select! {
-            // Token::Arrow => BuiltinOp::Arrow,
-            Token::Car => BuiltinOp::Car,
-            Token::Cdr => BuiltinOp::Cdr,
-            // Token::Eq => BuiltinOp::Eq,
-            Token::Pair => BuiltinOp::Pair,
-            Token::Cons => BuiltinOp::Cons,
-            Token::Claim => BuiltinOp::Claim,
-            Token::Define => BuiltinOp::Define,
-            // Token::Type => BuiltinOp::Type,
-            // Token::just_skip_comments => BuiltinOp::Just,
-        }
-        .map(SugarExpr::Builtin);
-
         // --- 4. Equality (Lowest Precedence Operator) ---
         // Equality takes any `expr` for its LHS, RHS, and Type.
         // This is the lowest precedence operator, so it appears first in the `choice`.
@@ -170,7 +161,6 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SugarExpr, extra::Err<Rich<'
             r#let,
             lambda,
             sigma,
-            builtins,
             basic,
             // pair,
             ident.clone().map(SugarExpr::Var),
@@ -222,7 +212,10 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SugarExpr, extra::Err<Rich<'
             |val, ty| SugarExpr::Ann(Box::new(val), Box::new(ty)),
         );
 
-        ann.then_ignore(skip_comments)
-            .or(skip_comments.map(|_| SugarExpr::Type))
+        let res = ann
+            .then_ignore(skip_comments)
+            .or(skip_comments.map(|_| SugarExpr::Type));
+
+        res.map_with(|expr, e| (expr, e.span()))
     })
 }

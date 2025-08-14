@@ -3,6 +3,7 @@ use std::{cell::RefCell, collections::HashMap, fmt::Display};
 use crate::{SugarExpr, Var};
 use chumsky::prelude::*;
 use derive_more::{Deref, DerefMut};
+use rex_core::Expr;
 
 use crate::Token;
 
@@ -28,22 +29,6 @@ use crate::Token;
 //     Builtin(BuiltinOp),
 // }
 //
-
-// T should be a wrapper around Expr like F<Expr>
-// TODO: Hole is a simple metavariable with no constraints. Do we need full metavariable support
-// TODO: What about a type annotations for the lambda param? I guess we just convert it to a pi
-// type
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Expr<T> {
-    Var { idx: usize },
-    App { func: T, arg: T },
-    Lambda { body: T },
-    Pi { param_ty: T, ret_ty: T },
-    Type,
-    Ann { expr: T, ty: T },
-    // represent _ in type meaning to be ignored unification means this variant always loses
-    Hole,
-}
 
 #[derive(Debug, Deref, DerefMut, Clone, PartialEq, Eq)]
 pub struct ExprTree(pub Expr<Box<ExprTree>>);
@@ -92,19 +77,17 @@ impl Display for ExprTree {
                     write!(f, "{} {}", &**func, &**arg)
                 }
             }
-            Expr::Lambda { body } => write!(f, "lambda {}", body),
+            Expr::Lambda { param_ty, body } => write!(f, "lambda {} {}", param_ty, body),
             Expr::Pi {
                 param_ty: _,
                 ret_ty,
             } => write!(f, "Pi (?) {}", ret_ty),
             Expr::Type => write!(f, "Type"),
-            Expr::Ann { expr, ty } => write!(f, "{}: {}", expr, ty),
-            Expr::Hole => write!(f, "_"),
         }
     }
 }
 
-type Context = Vec<String>;
+pub type Context = Vec<String>;
 
 pub fn resolve(name: String, ctx: &mut Context) -> Option<usize> {
     ctx.iter().rev().position(|n| *n == name)
@@ -125,7 +108,6 @@ pub fn desugar(expr: SugarExpr, ctx: &mut Context) -> ExprTree {
             func: Box::new(desugar(*sugar_expr, ctx)),
             arg: Box::new(desugar(*sugar_expr1, ctx)),
         },
-        SugarExpr::Builtin(builtin_op) => todo!(),
 
         SugarExpr::Lambda(param, param_ty, body) => {
             let param_ty = Box::new(desugar(*param_ty, ctx));
@@ -133,14 +115,7 @@ pub fn desugar(expr: SugarExpr, ctx: &mut Context) -> ExprTree {
             ctx.push(param);
             let body = Box::new(desugar(*body, ctx));
             ctx.pop();
-
-            Expr::Ann {
-                expr: Box::new(ExprTree(Expr::Lambda { body })),
-                ty: Box::new(ExprTree(Expr::Pi {
-                    param_ty,
-                    ret_ty: Box::new(ExprTree(Expr::Hole)),
-                })),
-            }
+            Expr::Lambda { param_ty, body }
         }
         SugarExpr::Pi(param, param_ty, ret_ty) => {
             let param_ty = Box::new(desugar(*param_ty, ctx));
@@ -155,11 +130,7 @@ pub fn desugar(expr: SugarExpr, ctx: &mut Context) -> ExprTree {
             todo!();
         }
 
-        SugarExpr::Ann(expr, ty) => Expr::Ann {
-            expr: Box::new(desugar(*expr, ctx)),
-            ty: Box::new(desugar(*ty, ctx)),
-        },
-
+        SugarExpr::Ann(expr, ty) => todo!("We do not support general type annotations yet"),
         // SugarExpr::MultiLambda(items, sugar_expr) => {
         //     items
         //         .into_iter()

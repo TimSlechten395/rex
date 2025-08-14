@@ -108,10 +108,6 @@ pub fn normalize(expr: &mut ExprTree) {
             normalize(&mut **param_ty);
             normalize(&mut **ret_ty);
         }
-        Expr::Ann { expr, ty } => {
-            normalize(&mut **expr);
-            normalize(&mut **ty);
-        }
         _ => {}
     }
 }

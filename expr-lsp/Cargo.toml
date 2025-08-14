@@ -1,9 +1,0 @@
-[package]
-name = "expr-lsp"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-expr = { path = "../expr" }
-tokio = "1.47.1"
-tower-lsp = "0.20.0"

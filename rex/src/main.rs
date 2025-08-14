@@ -7,11 +7,9 @@ use std::{
     path::Path,
 };
 
-use chumsky::prelude::*;
-
-use expr::{
+use rex::{
     BuiltinOp, Context, ExprTree, SugarExpr, Token, Var, desugar, lexer, normalize, parser, repl,
-    r#type::{TypeContext, infer_type},
+    r#type::TypeContext,
 };
 
 use rustyline::{DefaultEditor, error::ReadlineError};
@@ -33,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 //
 
                 let lxr = lexer();
-                let tokens = lxr.parse(&line).unwrap();
+                let tokens = lxr.parse(&line).unwrap().map(|(expr, _span)| expr);
                 println!("found tokens: {:?}", tokens);
 
                 let parser = parser();
@@ -55,7 +53,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let def_tokens = lxr
                         .parse(&def)
                         .into_result()
-                        .unwrap_or_else(|e| panic!("Failed to lex def {i}: {e:?}"));
+                        .unwrap_or_else(|e| panic!("Failed to lex def {i}: {e:?}"))
+                        // remove the span for now
+                        .map(|pair| pair.0);
 
                     let def_parser = repl::get_definition();
                     let ((ident, ty), expr) = def_parser
@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             defs.into_iter()
                                 .fold(ast, |ast, (def_name, (def_ty, def_expr))| {
                                     SugarExpr::LetIn(
-                                        Var::Ident(def_name),
+                                        def_name,
                                         Box::new(def_ty),
                                         Box::new(def_expr),
                                         Box::new(ast),
@@ -93,18 +93,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         println!();
 
                         let mut ty_ctx = TypeContext::default();
-                        match infer_type(&expr, &mut ty_ctx) {
-                            Ok(inferred_type) => {
-                                let mut norm_ty = inferred_type.clone();
-                                normalize(&mut norm_ty);
-                                println!("Type checking successfull");
-                                println!("The program has the type: {:?}", norm_ty);
-                            }
-                            Err(e) => {
-                                eprintln!("Type checking failed!");
-                                eprintln!("Error: {:?}", e);
-                            }
-                        }
+                        // match infer_type(&expr, &mut ty_ctx) {
+                        //     Ok(inferred_type) => {
+                        //         let mut norm_ty = inferred_type.clone();
+                        //         normalize(&mut norm_ty);
+                        //         println!("Type checking successfull");
+                        //         println!("The program has the type: {:?}", norm_ty);
+                        //     }
+                        //     Err(e) => {
+                        //         eprintln!("Type checking failed!");
+                        //         eprintln!("Error: {:?}", e);
+                        //     }
+                        // }
 
                         println!("\n Evaluating the program (if it has a value)...");
                         let mut evaluated_term = expr.clone();
