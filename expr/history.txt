@@ -1,0 +1,101 @@
+#V2
+-> Atom (Pair Atom Atom)
+->
+-> Atom (Pair Atom Atom)
+a b c
+(a b) c
+a (b c)
+a b c
+a (b c)
+(a b) c
+car (cons Atom 'pepper)
+lambda (a d) (cons a d)
+lambda (y) (f y)
+lambda (x) (car (cons x x))
+define one (add1 zero)
+one
+define one (add1 zero)
+one
+cons (car p) (cdr p)
+(lambda (a b) a)
+(lambda (a b) a) ()
+(lambda (a b) a) a
+(lambda (a b) a) d c
+lambda (a b) a
+type x y
+type x x
+type x
+type x x
+x x
+type x x x
+(Vec Atom howmanypeas
+(Vec Atom howmanypeas)
+define mot_peas lambda (k) (Vec Atom k)
+motpeas zero
+define hlel
+define hell (32)
+exit
+hello (Vec mot peas)
+n1
+n2
+a: 2
+a: b
+lambda (x: y) x
+shutdown now
+exit
+x
+let x = 3 in x
+x
+x |> y
+(x) |> (y)
+x y
+x |> y
+x |> y |> z
+x : 3
+(x:3)
+lambda x x
+lambda (x: h)
+lambda (x: h) x
+lambda (x: h) y
+lambda (x: h) x
+lambda (x: h) (lambda (y: h) (x y))
+a : x
+a :x
+Type
+a : Type
+x : y
+lambda (x:type) x
+lambda (x:Type) x
+lambda (x : Type) x
+lambda (x : (Type)) x
+Type
+Type : Type
+(x: Type) -> Eq x
+(x: Type) -> (x)
+what is wrong with you
+(x: Type) -> (x)
+(x: Type) -> x x
+lambda (x: Type) x x
+lambda (x: Nat) x x
+lambda (x : Nat) x
+na
+lambda (x : Nat) x
+lambda (x : Nat, y : Nat) x
+lambda (x: Nat, y: Nat) x y
+let x: Type = hello in x
+let x = 4 in x
+let x: 3 = 4 in x
+let x: wha = 4 in x
+let x: wha = wee in x
+let x: Type = true in x
+let x: Bool = true in x
+let x: Bool(True) = true in x
+x
+y
+x
+a
+let x: Type = hell
+let x: Type = hell in x
+a
+succ
+succ zero

@@ -1,0 +1,142 @@
+// Types use ... -> ... and functions fn ... -> ..
+
+// 1: Unit type and value also called top
+let Unit: Type = (A: Type) -> A -> A
+
+let unit: Unit = fn (A: Type) -> fn (x: A) -> x
+
+// 2: Never type (aka Bottom/False)
+let Never: Type = fn (A: Type) -> A
+
+// 3: Natural numbers
+let Nat: Type = (A: Type) -> (A -> A) -> A -> A
+let zero: Nat = fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> x
+let succ : Nat -> Nat =
+  fn (n: Nat) -> fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> f (n A f x)
+let add : Nat -> Nat -> Nat =
+  fn (m: Nat) -> fn (n: Nat) ->
+    fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> m A f (n A f x)
+let mul: Nat -> Nat -> Nat =
+  fn (m: Nat) -> fn (n: Nat) ->
+    fn (A: Type) -> fn (f: A -> A) -> m A (n A f) 
+// exponentiation
+let exp: Nat -> Nat -> Nat =
+  fn (m: Nat) -> fn (n: Nat) ->
+    n Nat (mul m) (succ zero)
+
+ Booleans (not to be confused with bottom and top)
+let Bool: Type = (A: Type) -> A -> A -> A
+let true: Bool = fn (A: Type) -> fn (t: A) -> fn (f: A) -> t
+let false: Bool = fn (A: Type) -> fn (t: A) -> fn (f: A) -> f
+
+
+let Pair: (A: Type) -> (B: Type) -> Type =
+  fn (A: Type) -> fn (B: Type) -> (C: Type) -> (A -> B -> C) -> C
+
+let pair: (A: Type) -> (B: Type) -> A -> B -> Pair A B =
+  fn (A: Type) -> fn (B: Type) -> fn (a: A) -> fn (b: B) ->
+    fn (C: Type) -> fn (f: A -> B -> C) -> f a b
+
+// is there a need for these two functions? These seem to be unnecessary
+let fst: (A: Type) -> (B: Type) -> Pair A B -> A =
+  fn (A: Type) -> fn (B: Type) -> fn (p: Pair A B) -> p A (fn (a: A) -> fn (b: B) -> a)
+
+let snd: (A: Type) -> (B: Type) -> Pair A B -> B =
+  fn (A: Type) -> fn (B: Type) -> fn (p: Pair A B) -> p B (fn (a: A) -> fn (b: B) -> b)
+
+
+let Either: (A: Type) -> (B: Type) -> Type =
+  fn (A: Type) -> fn (B: Type) -> (C: Type) -> (A -> C) -> (B -> C) -> C
+
+// these are also easily derivable
+let left: (A: Type) -> (B: Type) -> A -> Either A B =
+  fn (A: Type) -> fn (B: Type) -> fn (a: A) -> fn (C: Type) -> fn (f: A -> C) -> fn (g: B -> C) -> f a
+
+let right: (A: Type) -> (B: Type) -> B -> Either A B =
+  fn (A: Type) -> fn (B: Type) -> fn (b: B) -> fn (C: Type) -> fn (f: A -> C) -> fn (g: B -> C) -> g b
+
+let either: (A: Type) -> (B: Type) -> Either A B -> (A -> C) -> (B -> C) -> C =
+  fn (A: Type) -> fn (B: Type) -> fn (e: Either A B) -> fn (C: Type) -> fn (f: A -> C) -> fn (g: B -> C) -> e C f g
+
+let Exists: ((X: Type) -> Type) -> Type =
+  fn (T: (X: Type) -> Type) -> (R: Type) -> ((X: Type) -> T X -> R) -> R
+
+let pack: (T: (X: Type) -> Type) -> (X: Type) -> T X -> Exists T =
+  fn (T: (X: Type) -> Type) -> fn (X: Type) -> fn (tx: T X) -> 
+    fn (R: Type) -> fn (k: (X: Type) -> T X -> R) -> k X tx
+
+let unpack: (T: (X: Type) -> Type) -> Exists T -> (R: Type) -> ((X: Type) -> T X -> R) -> R =
+  fn (T: (X: Type) -> Type) -> fn (e: Exists T) -> fn (R: Type) -> fn (k: (X: Type) -> T X -> R) -> e R k
+
+let Eq : (A: Type) -> A -> A -> Type =
+  fn (A: Type) -> fn (x: A) -> fn (y: A) -> (P: A -> Type) -> P x -> P y
+
+let Equiv : (A : Type) -> (B : Type) -> (f: A -> B) -> (g: A -> B) -> Type =
+  fn (A: Type) -> fn (B: Type) -> fn (f: A -> B) -> (x : A) -> Eq B (f x) (g x)
+
+let refl : (A: Type) -> (x: A) -> Eq A x x =
+  fn (A: Type) -> fn (x: A) -> fn (P: A -> Type) -> fn (px: P x) -> px
+
+let InverseLeft : (A: Type) -> (B: Type) -> (f: A -> B) -> (g: B -> A) -> Type =
+  fn (A: Type) -> fn (B: Type) -> fn (f: A -> B) -> fn (g: B -> A) ->
+    (x: A) -> Eq A (g (f x)) x
+
+let InverseRight : (A: Type) -> (B: Type) -> (f: A -> B) -> (g: B -> A) -> Type =
+  fn (A: Type) -> fn (B: Type) -> fn (f: A -> B) -> fn (g: B -> A) ->
+    (y: B) -> Eq B (f (g y)) y
+
+let Inverse : (A: Type) -> (B: Type) -> (f: A -> B) -> (g: B -> A) -> Type =
+  fn (A: Type) -> fn (B: Type) -> fn (f: A -> B) -> fn (g: B -> A) ->
+    Pair
+      ((x: A) -> Eq A (g (f x)) x)  
+      ((y: B) -> Eq B (f (g y)) y)  
+
+let Int : Type =
+  fn (X: Type) ->
+  X ->
+  (X -> X) ->
+  (X -> X) ->
+  Inverse X X f g ->
+  X
+
+ket int_zero : Int =
+  fn (X: Type) ->
+  fn (x: X) ->
+  fn (f: X -> X) ->
+  fn (g: X -> X) ->
+  fn (proof: Inverse X X f g) ->
+    x
+
+let int_succ : Int -> Int =
+  fn (n: Int) ->
+  fn (X: Type) ->
+  fn (x: X) ->
+  fn (f: X -> X) ->
+  fn (g: X -> X) ->
+  fn (proof: Inverse X X f g) ->
+    f (n X x f g proof)
+
+let int_pred : Int -> Int =
+  fn (n: Int) ->
+  fn (X: Type) ->
+  fn (x: X) ->
+  fn (f: X -> X) ->
+  fn (g: X -> X) ->
+  fn (proof: Inverse X X f g) ->
+    g (n X x f g proof)
+
+
+// u8 definition (subtraction is not possible if build on Nats)
+let two: Nat = succ succ zero
+let eight: Nat = succ succ succ succ succ succ succ succ zero
+let pow_2_8: Nat = exp two eight
+let U8: Type = fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> fn (p: Eq (pow_2_8 A f x)) -> A
+
+let u8_zero: U8 =
+  fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> fn (p: Eq (pow_2_8 A f x) x) -> x
+
+let u8_succ: U8 -> U8 =
+  fn (n: U8) ->
+    fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> fn (p: Eq (pow_2_8 A f x) x) ->
+      f (n A f x p)
+
