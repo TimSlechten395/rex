@@ -1,7 +1,7 @@
 // T should be a wrapper around Expr like F<Expr>
 // our compiler goes from text -> tokens -> sugar_ast -> typed_sugar_ast -> core
 // Var is stored as Debruijn indices.
-// TODO: explore using globally unique ids for vars, or storing the type directly with the var
+// TODO: explore using NodeId of the lambda itself instead of Debruijn indices.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<T> {
     Var { idx: usize },

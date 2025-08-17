@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use chumsky::prelude::*;
+use chumsky::{input::ValueInput, prelude::*};
 use either::Either::{self, Right};
 
 use crate::lexer::Token;
@@ -13,9 +13,8 @@ pub type Var = String;
 #[derive(Debug, Clone, PartialEq)]
 pub enum SugarExpr<T> {
     Var(Var),
-    App(T, T),    // Function application
-    Type,         // Type universe U0, U1, etc.
-    Atom(String), // Atom literals (e.g., 'hello)
+    App(T, T), // Function application
+    Type,      // Type universe U0, U1, etc.
     Lambda(Var, T, T),
 
     Ann(T, T),
@@ -50,6 +49,8 @@ pub enum SugarExpr<T> {
 // Span is outside because the root expr also has a span. Box is inside because the root expr
 // doesn't need to be boxed.
 type Spanned<T> = (T, SimpleSpan);
+
+#[derive(Debug, Clone)]
 pub struct SpannedSugarExpr(pub Spanned<SugarExpr<Box<SpannedSugarExpr>>>);
 
 pub fn full_parser<'a>()
@@ -57,17 +58,22 @@ pub fn full_parser<'a>()
     parser().separated_by(just(Token::SemiColon)).collect()
 }
 
+pub type Span = SimpleSpan;
+
 // TODO: Handle comments better
-pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SpannedSugarExpr, extra::Err<Rich<'a, Token>>> {
+pub fn parser<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, SpannedSugarExpr, extra::Err<Rich<'tokens, Token>>> + Clone
+where
+    I: ValueInput<'tokens, Token = Token, Span = Span>,
+{
     let skip_comments = select! {Token::Comment(_)}.ignored().repeated();
     let just_skip_comments = |p| skip_comments.clone().ignore_then(just(p));
-    recursive(|expr| {
+    recursive(|expr: Recursive<dyn Parser<'_, _, SpannedSugarExpr, _>>| {
         // `expr` represents the *entire* expression grammar
         // --- 1. Basic Tokens ---
-        let basic = skip_comments.clone().ignore_then(select! {
-        Token::Atom(name) => SugarExpr::Atom(name),
-        Token::Type =>  SugarExpr::Type,
-        });
+        let r#type = skip_comments
+            .clone()
+            .ignore_then(just(Token::Type).to(SugarExpr::Type));
 
         let ident = skip_comments.clone().ignore_then(select! {
         Token::Ident(name) => name});
@@ -122,7 +128,8 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SpannedSugarExpr, extra::Err
                     let (name, ty) = params.into_iter().next().unwrap();
                     SugarExpr::Lambda(name, Box::new(ty), Box::new(body))
                 } else if params.len() > 1 {
-                    SugarExpr::MultiLambda(params, Box::new(body))
+                    todo!()
+                    // SugarExpr::MultiLambda(params, Box::new(body))
                 } else {
                     unreachable!()
                 }
@@ -156,16 +163,15 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SpannedSugarExpr, extra::Err
 
         // --- 6. Atom (Highest Precedence Base Expressions) ---
         // 'Atoms' are expressions that contain no ambiguity
-        let atom = choice((
-            r#loop,
-            r#let,
-            lambda,
-            sigma,
-            basic,
-            // pair,
-            ident.clone().map(SugarExpr::Var),
-            paren_expr,
-        ));
+
+        let atom = ident
+            .map(SugarExpr::Var)
+            .or(r#let)
+            .or(lambda)
+            .or(sigma)
+            .or(r#type)
+            .map_with(|expr, e| SpannedSugarExpr((expr, e.span())))
+            .or(paren_expr);
 
         // --- 6. operator precedence forms (Highest binding powers first)
         // Application (Left-Associative Operator)
@@ -173,13 +179,15 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SpannedSugarExpr, extra::Err
             .clone() // The function being applied (e.g., `f`)
             // `foldl` repeatedly parses `projection`s as arguments.
             // This ensures `f x y` parses as `(f x) y`.
-            .foldl(atom.repeated(), |acc, arg| {
-                SugarExpr::App(Box::new(acc), Box::new(arg))
+            .foldl_with(atom.repeated(), |acc, arg, e| {
+                SpannedSugarExpr((SugarExpr::App(Box::new(acc), Box::new(arg)), e.span()))
             });
 
-        let pipe = app.clone().foldl(
+        let pipe = app.clone().foldl_with(
             just_skip_comments(Token::Pipe).ignore_then(app).repeated(),
-            |acc, arg| SugarExpr::Pipe(Box::new(acc), Box::new(arg)),
+            |acc, arg, e| {
+                SpannedSugarExpr((SugarExpr::Pipe(Box::new(acc), Box::new(arg)), e.span()))
+            },
         );
 
         let pi = var_and_type
@@ -192,30 +200,31 @@ pub fn parser<'a>() -> impl Parser<'a, &'a [Token], SpannedSugarExpr, extra::Err
             .or(pipe.clone().map(Either::Right))
             .then_ignore(just_skip_comments(Token::Arrow))
             .repeated()
-            .foldr(
+            .foldr_with(
                 pipe.clone(),
                 // param is the recursive one
-                |param, ret_ty| match param {
-                    Either::Left((name, ty)) => SugarExpr::Pi(name, Box::new(ty), Box::new(ret_ty)),
+                |param, ret_ty, e| match param {
+                    Either::Left((name, ty)) => SpannedSugarExpr((
+                        SugarExpr::Pi(name, Box::new(ty), Box::new(ret_ty)),
+                        e.span(),
+                    )),
                     //TODO: We problably should reserve 0 just for this?
-                    Either::Right(ty) => {
-                        SugarExpr::Pi(String::new(), Box::new(ty), Box::new(ret_ty))
-                    }
+                    Either::Right(ty) => SpannedSugarExpr((
+                        SugarExpr::Pi(String::new(), Box::new(ty), Box::new(ret_ty)),
+                        e.span(),
+                    )),
                 },
             );
 
         // type ann
-        let ann = pi.clone().foldl(
+        let ann = pi.clone().foldl_with(
             just_skip_comments(Token::Colon)
                 .ignore_then(pipe)
                 .repeated(),
-            |val, ty| SugarExpr::Ann(Box::new(val), Box::new(ty)),
+            |val, ty, e| SpannedSugarExpr((SugarExpr::Ann(Box::new(val), Box::new(ty)), e.span())),
         );
 
-        let res = ann
-            .then_ignore(skip_comments)
-            .or(skip_comments.map(|_| SugarExpr::Type));
-
-        res.map_with(|expr, e| (expr, e.span()))
+        ann.then_ignore(skip_comments)
+            .or(skip_comments.map_with(|_, e| SpannedSugarExpr((SugarExpr::Type, e.span()))))
     })
 }
