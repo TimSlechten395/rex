@@ -1,43 +1,56 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    hash::{DefaultHasher, Hash, Hasher},
+};
 
 use crate::{Expr, ExprTree};
 
-pub type NodeId = usize;
+// We need hashes if we want parallell compilation. different cores need to end up with the same
+// hash for equal expressions
+pub type NodeId = u64;
 
 pub type ExprGraph = Expr<NodeId>;
 
 // invariant: id = reverse.get(nodes.get(id))
 // TODO: figure out of reference counting is usefull here
+// NOTE: We could cache this for incremental compilation but we need a way to get rid of dead code
+// which means we need reference counting
+#[derive(Debug, Clone)]
 pub struct SeaOfNodes {
+    // could be HashMap<NodeId, Rc<ExprGraph>> but this does not make jfj
     nodes: HashMap<NodeId, ExprGraph>,
-    reverse: HashMap<ExprGraph, NodeId>,
+    // this map was needed for sequential ids but now we just hash ExprGraph directly
+    // reverse: HashMap<ExprGraph, NodeId>,
     // this is a substitution map for example the nodeId of add 5 4 points to the node_id of 9
-    forward: HashMap<NodeId, NodeId>,
+    cache: HashMap<NodeId, NodeId>,
     // Store the type of an expr. for example: 3: Nat and Nat: Type
     tys: HashMap<NodeId, NodeId>,
-    next_id: NodeId,
 }
 
 impl SeaOfNodes {
     pub fn new() -> Self {
         SeaOfNodes {
             nodes: HashMap::new(),
-            reverse: HashMap::new(),
-            forward: HashMap::new(),
+            // reverse: HashMap::new(),
+            cache: HashMap::new(),
             tys: HashMap::new(),
-            next_id: 0,
         }
     }
 
+    // WARN: Surely hash collisions cannot happen
+    // Technically we can avoid collisions by holding a HashMap<NodeId, SmallVec<ExprGraph>> instead but
+    // this is quite expensive
     pub fn add_node(&mut self, node: ExprGraph) -> NodeId {
-        if let Some(&id) = self.reverse.get(&node) {
-            return id;
+        let mut hasher = DefaultHasher::new();
+        let node_id = node.hash(&mut hasher);
+        let hash = hasher.finish();
+        match self.nodes.entry(hash) {
+            Entry::Vacant(v) => {
+                v.insert(node);
+            }
+            Entry::Occupied(_) => (),
         }
-        let id = self.next_id;
-        self.next_id += 1;
-        self.nodes.insert(id, node.clone());
-        self.reverse.insert(node, id);
-        id
+        hash
     }
 
     pub fn get_node(&self, id: NodeId) -> Option<&ExprGraph> {
@@ -45,8 +58,11 @@ impl SeaOfNodes {
     }
 }
 
-// its a little weird to have nodes for DeBruijn idices but I guess it works
+// its a little weird to have nodes for DeBruijn indices but I guess it works
 // This function should be a single MapAccumL
+// TODO: stupid idea let Expr::Var contain id of the lambda it is bound to.
+// That does not work we get the id by hashing. and we need DeBruijn index anyway for
+// uniqueness.
 fn lower_expr(ast: &ExprTree, sea: &mut SeaOfNodes) -> NodeId {
     match &**ast {
         Expr::Var { idx } => sea.add_node(ExprGraph::Var { idx: *idx }),
@@ -185,10 +201,10 @@ pub fn eager_normalize(expr_id: NodeId, sea: &mut SeaOfNodes) -> NodeId {
 }
 
 // normalize everything, even inside lambdas.
-// TODO: This functions does to much. Reading and writing the forward cache should be done at a
+// TODO: This functions does to much. Reading and writing the cache should be done at a
 // higher level
 pub fn strong_normalize(expr: NodeId, sea: &mut SeaOfNodes) -> NodeId {
-    if let Some(new_expr) = sea.forward.get(&expr).cloned() {
+    let new_expr = if let Some(new_expr) = sea.cache.get(&expr).cloned() {
         new_expr
     } else {
         let expr_node = sea.get_node(expr).unwrap();
@@ -209,8 +225,10 @@ pub fn strong_normalize(expr: NodeId, sea: &mut SeaOfNodes) -> NodeId {
             _ => expr,
         };
         new_expr
-    }
-    // sea.forward.insert(expr, new_expr);
+    };
+    // Do we need to do this
+    sea.cache.insert(expr, new_expr);
+    new_expr
 }
 
 #[derive(Debug)]

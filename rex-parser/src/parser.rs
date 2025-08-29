@@ -14,7 +14,7 @@ pub type Var = String;
 pub enum SugarExpr<T> {
     Var(Var),
     App(T, T), // Function application
-    Type,      // Type universe U0, U1, etc.
+    Type,      // Type of all types
     Lambda(Var, T, T),
 
     Ann(T, T),
@@ -24,6 +24,9 @@ pub enum SugarExpr<T> {
     Sigma(Var, T, T),
 
     // --- Syntactic Sugar Variants ---
+
+    // This is not sugar its necessary for transforming linear text into trees
+    Group(T),
 
     // Multi-argument Lambda (sugar for nested single-arg lambdas)
     // Example: `(lambda (x:T y:U) body)`
@@ -48,7 +51,7 @@ pub enum SugarExpr<T> {
 
 // Span is outside because the root expr also has a span. Box is inside because the root expr
 // doesn't need to be boxed.
-type Spanned<T> = (T, SimpleSpan);
+pub type Spanned<T> = (T, SimpleSpan);
 
 #[derive(Debug, Clone)]
 pub struct SpannedSugarExpr(pub Spanned<SugarExpr<Box<SpannedSugarExpr>>>);
@@ -61,10 +64,8 @@ pub fn full_parser<'a>()
 pub type Span = SimpleSpan;
 
 // TODO: Handle comments better
-pub fn parser<'tokens, 'src: 'tokens, I>()
--> impl Parser<'tokens, I, SpannedSugarExpr, extra::Err<Rich<'tokens, Token>>> + Clone
-where
-    I: ValueInput<'tokens, Token = Token, Span = Span>,
+pub fn parser<'tokens, 'src: 'tokens>()
+-> impl Parser<'tokens, &'tokens [Token], SpannedSugarExpr, extra::Err<Rich<'tokens, Token>>> + Clone
 {
     let skip_comments = select! {Token::Comment(_)}.ignored().repeated();
     let just_skip_comments = |p| skip_comments.clone().ignore_then(just(p));
@@ -78,10 +79,13 @@ where
         let ident = skip_comments.clone().ignore_then(select! {
         Token::Ident(name) => name});
 
-        let paren_expr = expr.clone().delimited_by(
-            just_skip_comments(Token::LParen),
-            just_skip_comments(Token::RParen),
-        );
+        let paren_expr = expr
+            .clone()
+            .delimited_by(
+                just_skip_comments(Token::LParen),
+                just_skip_comments(Token::RParen),
+            )
+            .map(|x| SugarExpr::Group(Box::new(x)));
 
         let var_and_type = ident
             .clone()
@@ -170,8 +174,8 @@ where
             .or(lambda)
             .or(sigma)
             .or(r#type)
-            .map_with(|expr, e| SpannedSugarExpr((expr, e.span())))
-            .or(paren_expr);
+            .or(paren_expr)
+            .map_with(|expr, e| SpannedSugarExpr((expr, e.span())));
 
         // --- 6. operator precedence forms (Highest binding powers first)
         // Application (Left-Associative Operator)
@@ -208,7 +212,8 @@ where
                         SugarExpr::Pi(name, Box::new(ty), Box::new(ret_ty)),
                         e.span(),
                     )),
-                    //TODO: We problably should reserve 0 just for this?
+                    //TODO: Should this be parsed as a different node since it is effectively
+                    // just another syntactic sugar
                     Either::Right(ty) => SpannedSugarExpr((
                         SugarExpr::Pi(String::new(), Box::new(ty), Box::new(ret_ty)),
                         e.span(),

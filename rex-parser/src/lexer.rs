@@ -4,13 +4,13 @@ use chumsky::text::{digits, ident, newline, whitespace};
 
 pub type Spanned<T> = (T, SimpleSpan);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Ident(String), // variable names, e.g. x, foo
-    Int(i64),      // integer literals
-    Bool(bool),    // true or false literals
+    Ident(String),  // variable names, e.g. x, foo
+    Number(f64),    // integer literals
+    Bool(bool),     // true or false literals
+    String(String), // 'atoms
     BoolTy,
-    Atom(String), // 'atoms
 
     Lambda, // '\' or 'λ'
     Dot,    // '.'
@@ -52,6 +52,26 @@ pub enum Token {
 
 // type Span = std::ops::Range<usize>;
 
+fn number_parser<'a>() -> impl Parser<'a, &'a str, f64, extra::Err<Rich<'a, char>>> {
+    let digits = text::digits(10).to_slice();
+
+    let frac = just('.').then(digits);
+
+    let exp = just('e')
+        .or(just('E'))
+        .then(one_of("+-").or_not())
+        .then(digits);
+
+    just('-')
+        .or_not()
+        .then(text::int(10))
+        .then(frac.or_not())
+        .then(exp.or_not())
+        .to_slice()
+        .map(|s: &str| s.parse().unwrap())
+        .boxed()
+}
+
 pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<Rich<'a, char>>> {
     // Keywords
     // Why does lambda need to be between ""?
@@ -62,9 +82,11 @@ pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<R
 
     let arrow = just('-').then_ignore(just('>')).to(Token::Arrow);
 
-    let atom_lit = just('\'')
-        .ignore_then(ident())
-        .map(|x: &str| Token::Atom(x.to_string()));
+    let number = number_parser().map(Token::Number);
+
+    let string = ident()
+        .delimited_by(just('"'), just('"'))
+        .map(|x: &str| Token::String(x.to_string()));
 
     let base = select! {
         '.' => Token::Dot,
@@ -96,18 +118,13 @@ pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<R
         "break" => Token::Break,
         "let" => Token::Let,
         "in" => Token::In,
-        // "true" => Token::Bool(true),
-        // "false" => Token::Bool(false),
+        "true" => Token::Bool(true),
+        "false" => Token::Bool(false),
         // "Bool" => Token::BoolTy,
         _ => Token::Ident(String::from(ident)),
     });
 
     // Integers
-    let integer = digits(10)
-        .collect::<String>()
-        .from_str()
-        .unwrapped()
-        .map(Token::Int);
 
     let comment_content = any().and_is(newline().or(end()).not()).repeated().collect();
 
@@ -116,7 +133,7 @@ pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<R
         .map(|content| Token::Comment(content));
 
     // Token parser: choice of all tokens, with whitespace trimmed around
-    let token = choice((comment, lambda, base, arrow, atom_lit, integer, ident, pipe))
+    let token = choice((comment, lambda, base, arrow, string, number, ident, pipe))
         .map_with(|token, e| (token, e.span()))
         .padded();
 

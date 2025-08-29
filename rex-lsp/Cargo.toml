@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 tower-lsp-server = "*"
+chumsky = "0.10.1"
 rex = { path = "../rex" }
 tokio = { version = "1.47.1", features = ["full", "tokio-macros"] }
+ropey = "1.6.1"
+dashmap = "6.1.0"

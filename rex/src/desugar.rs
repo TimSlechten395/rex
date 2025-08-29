@@ -1,9 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Display};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, ops::Range};
 
 use crate::{SugarExpr, Var};
 use chumsky::prelude::*;
 use derive_more::{Deref, DerefMut};
 use rex_core::Expr;
+use rex_parser::parser::SpannedSugarExpr;
 
 use crate::Token;
 
@@ -45,8 +46,6 @@ pub enum BuiltinOp {
     Type,
     Just,
 }
-
-pub struct Id(usize);
 
 impl Display for BuiltinOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -94,8 +93,9 @@ pub fn resolve(name: String, ctx: &mut Context) -> Option<usize> {
 }
 
 // TODO: We need a system to allow for partial type annotation
-pub fn desugar(expr: SugarExpr, ctx: &mut Context) -> ExprTree {
-    let new_expr = match expr {
+// TODO: We also need to keep the spans in the exprTree
+pub fn desugar(expr: SpannedSugarExpr, ctx: &mut Context) -> ExprTree {
+    let new_expr = match expr.0.0 {
         SugarExpr::Var(name) => {
             let idx = resolve(name, ctx);
             if let Some(idx) = idx {
@@ -167,8 +167,12 @@ pub fn desugar(expr: SugarExpr, ctx: &mut Context) -> ExprTree {
         // This is done so we do not lose graph information.
 
         // let x: Nat = 3 in ....
+        // TODO: This got messed up after adding spans
         SugarExpr::LetIn(name, ty, arg, body) => {
-            let lambda = Box::new(desugar(SugarExpr::Lambda(name, ty, body), ctx));
+            let lambda = Box::new(ExprTree(Expr::Lambda {
+                param_ty: Box::new(desugar(*ty, ctx)),
+                body: Box::new(desugar(*body, ctx)),
+            }));
 
             let arg = Box::new(desugar(*arg, ctx));
 
