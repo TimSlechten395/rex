@@ -98,7 +98,7 @@ let Int : Type =
   Inverse X X f g ->
   X;
 
-ket int_zero : Int =
+let int_zero : Int =
   fn (X: Type) ->
   fn (x: X) ->
   fn (f: X -> X) ->
@@ -126,7 +126,7 @@ let int_pred : Int -> Int =
 
 
 // u8 definition (subtraction is not possible if build on Nats)
-let two: Nat = succ succ zero
+let two: Nat = succ succ zero;
 let eight: Nat = succ succ succ succ succ succ succ succ zero;
 let pow_2_8: Nat = exp two eight;
 let U8: Type = fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> fn (p: Eq (pow_2_8 A f x)) -> A;
@@ -138,4 +138,5 @@ let u8_succ: U8 -> U8 =
   fn (n: U8) ->
     fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> fn (p: Eq (pow_2_8 A f x) x) ->
       f (n A f x p);
+a
 

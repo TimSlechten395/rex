@@ -1,13 +1,17 @@
+pub mod hover;
 pub mod semantic_tokens;
 pub mod update;
+
+use std::sync::Arc;
+
 use chumsky::Parser;
 use dashmap::DashMap;
 use rex::sea_nodes::{NodeId, SeaOfNodes, lower_expr};
+use rex::{ErrorToken, SpannedResultSugarExpr, SugarExpr};
 use ropey::Rope;
 use tokio::sync::Mutex;
-use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::lsp_types::*;
-use tower_lsp_server::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::{Client, LanguageServer, LspService, Server, jsonrpc};
 
 use rex::{Context, Token, lexer, lexer::Spanned, parser};
 
@@ -17,21 +21,22 @@ use crate::update::update;
 #[derive(Debug)]
 pub struct Backend {
     pub client: Client,
-    pub files: DashMap<Uri, Rope>,
-    pub tokens: DashMap<Uri, Vec<Spanned<Token>>>,
-    pub asts: DashMap<Uri, NodeId>,
-    pub sea_of_nodes: Mutex<SeaOfNodes>,
+    pub files: Arc<DashMap<Uri, Rope>>,
+    pub tokens: Arc<DashMap<Uri, Vec<Spanned<Result<Token, ErrorToken>>>>>,
+    // This is actually quite expensive to store like this
+    pub sugar_asts: Arc<DashMap<Uri, SpannedResultSugarExpr>>,
+    pub core_asts: Arc<DashMap<Uri, Vec<NodeId>>>,
+    pub sea_of_nodes: Arc<Mutex<SeaOfNodes>>,
 }
 
 impl LanguageServer for Backend {
-    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, _params: InitializeParams) -> jsonrpc::Result<InitializeResult> {
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "rex language server".to_string(),
                 version: Some("0.1.0".to_string()),
             }),
             capabilities: ServerCapabilities {
-                // Advertise a couple of features so the client knows what to ask for.
                 position_encoding: Some(PositionEncodingKind::UTF8),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
@@ -47,24 +52,25 @@ impl LanguageServer for Backend {
     async fn initialized(&self, _: InitializedParams) {
         // Show up in the client's log
         self.client
-            .log_message(MessageType::INFO, "my-lsp initialized")
+            .log_message(MessageType::INFO, "rex-lsp initialized")
             .await;
     }
 
-    async fn shutdown(&self) -> Result<()> {
+    async fn shutdown(&self) -> jsonrpc::Result<()> {
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let file = params.text_document;
-
-        update(&self, file.uri.clone(), file.text.clone()).await;
-
         self.files
             .insert(file.uri.clone(), Rope::from_str(&file.text));
 
+        if let Err(e) = update(&self, file.uri.clone(), file.text.clone()).await {
+            self.client.log_message(MessageType::ERROR, e).await;
+        }
+
         self.client
-            .log_message(MessageType::INFO, "added file to context")
+            .log_message(MessageType::INFO, "updated state")
             .await;
 
         // self.publish_todo_diagnostics(file.uri, file.text.clone())
@@ -91,7 +97,9 @@ impl LanguageServer for Backend {
             }
         }
 
-        update(&self, uri.clone(), file.to_string()).await;
+        if let Err(e) = update(&self, uri.clone(), file.to_string()).await {
+            self.client.log_message(MessageType::ERROR, e).await;
+        }
 
         if let Some(change) = params.content_changes.into_iter().last() {
             self.publish_todo_diagnostics(uri, change.text).await;
@@ -104,7 +112,10 @@ impl LanguageServer for Backend {
     }
 
     // Simple completion: always offer the same two items.
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    async fn completion(
+        &self,
+        _params: CompletionParams,
+    ) -> jsonrpc::Result<Option<CompletionResponse>> {
         Ok(Some(CompletionResponse::Array(vec![
             CompletionItem::new_simple("Hello".into(), "Greets the user".into()),
             CompletionItem::new_simple("Bye".into(), "Says farewell".into()),
@@ -112,27 +123,24 @@ impl LanguageServer for Backend {
     }
 
     // Simple hover: show a fixed message.
-    async fn hover(&self, _params: HoverParams) -> Result<Option<Hover>> {
-        Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::String(
-                "You're hovering over something!".into(),
-            )),
-            range: None,
-        }))
+    async fn hover(&self, params: HoverParams) -> jsonrpc::Result<Option<Hover>> {
+        hover::hover(self, params).await
     }
 
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
-    ) -> Result<Option<SemanticTokensResult>> {
+    ) -> jsonrpc::Result<Option<SemanticTokensResult>> {
         self.client
             .log_message(MessageType::INFO, "computing tokens")
             .await;
-        let result = semantic_tokens_full(&self, params.clone()).await;
+        // let result = semantic_tokens_full(&self, params.clone()).await;
 
+        let result = Ok(None);
         self.client
             .log_message(MessageType::INFO, "done computing tokens")
             .await;
+
         result
     }
 }

@@ -2,21 +2,33 @@ use chumsky::prelude::*;
 use chumsky::span::SimpleSpan;
 use chumsky::text::{digits, ident, newline, whitespace};
 
+// TODO: Think about how to handle inert and error tokens, same for nodes
+// I think we should not pass them to the parser since they will be ingored anyway.
+// We could just propogate errors through the different layers and for example store a
+// ErrorNode(TokenError) but The ast should not be aware of a specific token type.
+
 pub type Spanned<T> = (T, SimpleSpan);
+
+#[derive(Debug, Clone)]
+pub enum ErrorToken {
+    ErrorToken(char),
+    // HACK: Comments are not really errors
+    Comment(String),
+    Space(usize),
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Ident(String),  // variable names, e.g. x, foo
     Number(f64),    // integer literals
-    Bool(bool),     // true or false literals
     String(String), // 'atoms
-    BoolTy,
 
-    Lambda, // '\' or 'λ'
-    Dot,    // '.'
-    Colon,  // ':'
-    SemiColon,
-    Arrow, // "->"
+    Fn,        // 'fn'
+    Pi,        // 'pi'
+    Dot,       // '.'
+    Colon,     // ':'
+    SemiColon, // ';'
+    Arrow,     // "->"
     Pipe,
     Star,   // '*'
     Comma,  // ','
@@ -39,7 +51,6 @@ pub enum Token {
     Claim,
     Define,
     Just,
-    Comment(String),
 
     // sugar keywords
     Loop,
@@ -72,13 +83,13 @@ fn number_parser<'a>() -> impl Parser<'a, &'a str, f64, extra::Err<Rich<'a, char
         .boxed()
 }
 
-pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<Rich<'a, char>>> {
+// fix errors by ()
+pub fn lexer<'a>()
+-> impl Parser<'a, &'a str, Vec<Spanned<Result<Token, ErrorToken>>>, extra::Err<Rich<'a, char>>> {
     // Keywords
     // Why does lambda need to be between ""?
-    let lambda = just("λ")
-        .or(text::keyword("lambda"))
-        .or(text::keyword("fn"))
-        .to(Token::Lambda);
+    let lambda = text::keyword("fn").to(Token::Fn);
+    let pi = text::keyword("pi").to(Token::Pi);
 
     let arrow = just('-').then_ignore(just('>')).to(Token::Arrow);
 
@@ -96,6 +107,7 @@ pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<R
         '(' => Token::LParen,
         ')' => Token::RParen,
         '=' => Token::Eq,
+        ';' => Token::SemiColon,
 
     };
 
@@ -118,8 +130,8 @@ pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<R
         "break" => Token::Break,
         "let" => Token::Let,
         "in" => Token::In,
-        "true" => Token::Bool(true),
-        "false" => Token::Bool(false),
+        // "true" => Token::Bool(true),
+        // "false" => Token::Bool(false),
         // "Bool" => Token::BoolTy,
         _ => Token::Ident(String::from(ident)),
     });
@@ -128,14 +140,17 @@ pub fn lexer<'a>() -> impl Parser<'a, &'a str, Vec<Spanned<Token>>, extra::Err<R
 
     let comment_content = any().and_is(newline().or(end()).not()).repeated().collect();
 
-    let comment = just("//")
-        .ignore_then(comment_content)
-        .map(|content| Token::Comment(content));
-
     // Token parser: choice of all tokens, with whitespace trimmed around
-    let token = choice((comment, lambda, base, arrow, string, number, ident, pipe))
-        .map_with(|token, e| (token, e.span()))
+    let token = choice((lambda, pi, base, arrow, string, number, ident, pipe))
+        .map_with(|token, e| (Ok(token), e.span()))
         .padded();
 
-    token.repeated().collect::<Vec<_>>()
+    let comment = just("//")
+        .ignore_then(comment_content)
+        .map_with(|content, e| (Err(ErrorToken::Comment(content)), e.span()));
+
+    let invalid = any().map_with(|c, e| (Err(ErrorToken::ErrorToken(c)), e.span()));
+    let error = comment.or(invalid);
+
+    token.or(error).repeated().collect::<Vec<_>>()
 }

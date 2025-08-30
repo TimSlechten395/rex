@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, fmt::Display, ops::Range};
 
-use crate::{SugarExpr, Var};
+use crate::SugarExpr;
 use chumsky::prelude::*;
 use derive_more::{Deref, DerefMut};
 use rex_core::Expr;
-use rex_parser::parser::SpannedSugarExpr;
+use rex_parser::parser::{NormalSugarExpr, ResultSugarExpr};
 
 use crate::Token;
 
@@ -94,8 +94,8 @@ pub fn resolve(name: String, ctx: &mut Context) -> Option<usize> {
 
 // TODO: We need a system to allow for partial type annotation
 // TODO: We also need to keep the spans in the exprTree
-pub fn desugar(expr: SpannedSugarExpr, ctx: &mut Context) -> ExprTree {
-    let new_expr = match expr.0.0 {
+pub fn desugar(expr: NormalSugarExpr, ctx: &mut Context) -> ExprTree {
+    let new_expr = match expr.0 {
         SugarExpr::Var(name) => {
             let idx = resolve(name, ctx);
             if let Some(idx) = idx {
@@ -108,27 +108,6 @@ pub fn desugar(expr: SpannedSugarExpr, ctx: &mut Context) -> ExprTree {
             func: Box::new(desugar(*sugar_expr, ctx)),
             arg: Box::new(desugar(*sugar_expr1, ctx)),
         },
-
-        SugarExpr::Lambda(param, param_ty, body) => {
-            let param_ty = Box::new(desugar(*param_ty, ctx));
-
-            ctx.push(param);
-            let body = Box::new(desugar(*body, ctx));
-            ctx.pop();
-            Expr::Lambda { param_ty, body }
-        }
-        SugarExpr::Pi(param, param_ty, ret_ty) => {
-            let param_ty = Box::new(desugar(*param_ty, ctx));
-            ctx.push(param);
-            let ret_ty = Box::new(desugar(*ret_ty, ctx));
-            ctx.pop();
-            Expr::Pi { param_ty, ret_ty }
-        }
-
-        //
-        SugarExpr::Sigma(var, ty, sugar_expr1) => {
-            todo!();
-        }
 
         SugarExpr::Ann(expr, ty) => todo!("We do not support general type annotations yet"),
         // SugarExpr::MultiLambda(items, sugar_expr) => {
@@ -178,7 +157,6 @@ pub fn desugar(expr: SpannedSugarExpr, ctx: &mut Context) -> ExprTree {
 
             Expr::App { func: lambda, arg }
         }
-        SugarExpr::Loop(sugar_expr) => todo!(),
 
         SugarExpr::Pipe(sugar_expr, sugar_expr1) => Expr::App {
             func: Box::new(desugar(*sugar_expr1, ctx)),

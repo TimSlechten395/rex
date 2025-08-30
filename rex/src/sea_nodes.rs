@@ -16,6 +16,9 @@ pub type ExprGraph = Expr<NodeId>;
 // NOTE: We could cache this for incremental compilation but we need a way to get rid of dead code
 // which means we need reference counting. We could store an extra HashMap<NodeId, Count> or we
 // could use Rc<ExprGraph>
+// WARN: neutral forms interact weirdly with the cache for example lambda 0 3 here three is a free
+// variable but for free variable it does not matter the index of the variable for application it
+// is seen as unknown
 #[derive(Debug, Clone)]
 pub struct SeaOfNodes {
     nodes: HashMap<NodeId, (ExprGraph, usize)>,

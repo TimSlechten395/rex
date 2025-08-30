@@ -6,4 +6,6 @@ edition = "2024"
 [dependencies]
 chumsky = "*"
 either = "*"
+functor_derive = "0.4.3"
 rex-core = { path = "../rex-core" }
+smallvec = "1.15.1"

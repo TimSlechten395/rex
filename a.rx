@@ -1,0 +1,39 @@
+// Types use ... -> ... and functions fn ... -> ..
+
+// 1: Unit type and value also called top
+let Unit: Type = (A: Type) -> A -> A;
+
+let unit: Unit = fn (A: Type) -> fn (x: A) -> x;
+
+// 2: Never type (aka Bottom/False)
+let Never: Type = fn (A: Type) -> A;
+
+// 3: Natural numbers
+let Nat: Type = (A: Type) -> (A -> A) -> A -> A;
+let zero: Nat = fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> x;
+let succ : Nat -> Nat =
+  fn (n: Nat) -> fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> f (n A f x);
+let add : Nat -> Nat -> Nat =
+  fn (m: Nat) -> fn (n: Nat) ->
+    fn (A: Type) -> fn (f: A -> A) -> fn (x: A) -> m A f (n A f x);
+let mul: Nat -> Nat -> Nat =
+  fn (m: Nat) -> fn (n: Nat) ->
+    fn (A: Type) -> fn (f: A -> A) -> m A (n A f);
+// exponentiation
+let exp: Nat -> Nat -> Nat =
+  fn (m: Nat) -> fn (n: Nat) ->
+    n Nat (mul m) (succ zero);
+
+// Booleans (not to be confused with bottom and top)
+let Bool: Type = (A: Type) -> A -> A -> A;
+let true: Bool = fn (A: Type) -> fn (t: A) -> fn (f: A) -> t;
+let false: Bool = fn (A: Type) -> fn (t: A) -> fn (f: A) -> f;
+
+
+let Pair: (A: Type) -> (B: Type) -> Type =
+  fn (A: Type) -> fn (B: Type) -> (C: Type) -> (A -> B -> C) -> C;
+
+let pair: (A: Type) -> (B: Type) -> A -> B -> Pair A B =
+  fn (A: Type) -> fn (B: Type) -> fn (a: A) -> fn (b: B) ->
+    fn (C: Type) -> fn (f: A -> B -> C) -> f a b;
+a

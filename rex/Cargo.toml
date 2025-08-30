@@ -11,3 +11,4 @@ rand = "0.9.1"
 rustyline = "16.0.0"
 rex-parser = { path = "../rex-parser" }
 rex-core = { path = "../rex-core" }
+anyhow = "1.0.99"

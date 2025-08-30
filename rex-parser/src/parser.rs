@@ -1,250 +1,226 @@
 use std::fmt::Display;
 
-use chumsky::{input::ValueInput, prelude::*};
+use chumsky::{container::Container, input::ValueInput, prelude::*};
 use either::Either::{self, Right};
+use functor_derive::Functor;
+use smallvec::SmallVec;
 
 use crate::lexer::Token;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MySmallVec<T>(SmallVec<[T; 4]>);
+impl<T> Default for MySmallVec<T> {
+    fn default() -> Self {
+        MySmallVec(SmallVec::new())
+    }
+}
+
+impl<T> Container<T> for MySmallVec<T> {
+    fn push(&mut self, item: T) {
+        self.0.push(item);
+    }
+}
+
 // Later all idents will become syntactic sugar for indices
-pub type Var = String;
 
 // This could have a variant Common(Expr<SugarExpr>). But we need lambda, pi and var seperate
 // anyway
-// TODO: Is this even worth it to have? We could just parse straight to core calculus no?
+// TODO: Is this even worth it to have?
 #[derive(Debug, Clone, PartialEq)]
 pub enum SugarExpr<T> {
-    Var(Var),
+    Var(String),
     App(T, T), // Function application
     Type,      // Type of all types
-    Lambda(Var, T, T),
 
     Ann(T, T),
-    // Pi: (x : Nat) -> Vector Nat x
-    Pi(Var, T, T),
 
-    Sigma(Var, T, T),
-
-    // --- Syntactic Sugar Variants ---
-
-    // This is not sugar its necessary for transforming linear text into trees
     Group(T),
 
     // Multi-argument Lambda (sugar for nested single-arg lambdas)
     // Example: `(lambda (x:T y:U) body)`
-    MultiLambda(Vec<(Var, T)>, T),
+    MultiLambda(MySmallVec<(String, Option<T>)>, T),
 
     // Multi-argument Pi Type (sugar for nested single-arg Pi types)
     // Example: `(Pi (x:T y:U) return_type)`
-    MultiPi(Vec<(Var, T)>, T),
-
-    // Multi-argument Sigma Type (sugar for nested single-arg Sigma types)
-    // Example: `(Sigma (x:T y:U) body_type)`
-    MultiSigma(Vec<(Var, T)>, T),
-
-    // Infinite Loop Sugar: `loop { body }`
-    Loop(T),
+    MultiPi(MySmallVec<(Option<String>, T)>, T),
 
     // Let binding sugar: `let name : type = value in body`
-    LetIn(Var, T, T, T),
+    LetIn(String, T, T, T),
     // Pipe operator
     Pipe(T, T),
 }
+
+#[derive(Debug, Clone, PartialEq, Functor)]
+pub enum ExprError<T> {
+    InvalidExpr(Token),
+    FailedLet(T),
+    Other(T),
+}
+
+#[derive(Debug, Clone)]
+pub struct NormalSugarExpr(pub SugarExpr<Box<NormalSugarExpr>>);
+
+#[derive(Debug, Clone)]
+pub struct ResultSugarExpr(
+    pub Result<SugarExpr<Box<ResultSugarExpr>>, ExprError<Box<ResultSugarExpr>>>,
+);
 
 // Span is outside because the root expr also has a span. Box is inside because the root expr
 // doesn't need to be boxed.
 pub type Spanned<T> = (T, SimpleSpan);
 
 #[derive(Debug, Clone)]
-pub struct SpannedSugarExpr(pub Spanned<SugarExpr<Box<SpannedSugarExpr>>>);
+pub struct SpannedResultSugarExpr(
+    pub  Spanned<
+        Result<SugarExpr<Box<SpannedResultSugarExpr>>, ExprError<Box<SpannedResultSugarExpr>>>,
+    >,
+);
 
-pub fn full_parser<'a>()
--> impl Parser<'a, &'a [Token], Vec<SpannedSugarExpr>, extra::Err<Rich<'a, Token>>> {
-    parser().separated_by(just(Token::SemiColon)).collect()
-}
+// returns result because whole tree might be invalid
+// pub fn clean(ast: SpannedResultSugarExpr) -> ResultSugarExpr {
+//     let cleaned = match ast.0.0 {
+//         Ok(ast) => Ok(ast.fmap(|ast| Box::new(clean(*ast)))),
+//         Err(err_ast) => Err(err_ast.fmap(|ast| Box::new(clean(*ast)))),
+//     };
+//
+//     ResultSugarExpr(cleaned)
+// }
 
 pub type Span = SimpleSpan;
 
-// TODO: Handle comments better
-// Explore combining passes: text -> tokens -> ast -> hash_cons all in one go
+// TODO: Use recursion schemes
 pub fn parser<'tokens, 'src: 'tokens>()
--> impl Parser<'tokens, &'tokens [Token], SpannedSugarExpr, extra::Err<Rich<'tokens, Token>>> + Clone
-{
-    let skip_comments = select! {Token::Comment(_)}.ignored().repeated();
-    let just_skip_comments = |p| skip_comments.clone().ignore_then(just(p));
-    recursive(|expr: Recursive<dyn Parser<'_, _, SpannedSugarExpr, _>>| {
+-> impl Parser<'tokens, &'tokens [Token], SpannedResultSugarExpr, extra::Err<Rich<'tokens, Token>>>
++ Clone {
+    recursive(|expr| {
         // `expr` represents the *entire* expression grammar
         // --- 1. Basic Tokens ---
-        let r#type = skip_comments
-            .clone()
-            .ignore_then(just(Token::Type).to(SugarExpr::Type));
+        let r#type = just(Token::Type).to(SugarExpr::Type);
         // same as base
 
-        let ident = skip_comments.clone().ignore_then(select! {
-        Token::Ident(name) => name});
+        let ident = select! {
+        Token::Ident(name) => name};
 
         let paren_expr = expr
             .clone()
-            .delimited_by(
-                just_skip_comments(Token::LParen),
-                just_skip_comments(Token::RParen),
-            )
+            .delimited_by(just(Token::LParen), just(Token::RParen))
             .map(|x| SugarExpr::Group(Box::new(x)));
 
         let var_and_type = ident
             .clone()
-            .then_ignore(just_skip_comments(Token::Colon))
+            .then_ignore(just(Token::Colon))
             .then(expr.clone());
 
-        // --- 5. Forms (Lambda, Pi, Sigma, Pair) ---
-        // Their internal components (e.g., parameter types, body, values) can be any `expr`.
-        // These are distinct syntactic constructs, not binary operators.
-        // They typically have lower precedence than application.
-        //
-        let r#loop = just_skip_comments(Token::Loop)
-            .ignore_then(expr.clone().delimited_by(
-                just_skip_comments(Token::LParen),
-                just_skip_comments(Token::RParen),
-            ))
-            .map(|body| SugarExpr::Loop(Box::new(body)));
+        // type annotation is optional
+        let lambda_arg = choice((
+            var_and_type
+                .clone()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|(name, ty)| (name, Some(Box::new(ty)))),
+            ident.clone().map(|name| (name, None)),
+        ));
 
-        // TODO: is it worth it to have both?
-        let let_in = just_skip_comments(Token::Let)
-            .ignore_then(var_and_type.clone())
-            .then_ignore(just_skip_comments(Token::Eq))
-            .then(expr.clone())
-            .then_ignore(just_skip_comments(Token::In))
-            .then(expr.clone())
-            .map(|(((var, ty), expr1), expr2)| {
-                SugarExpr::LetIn(var, Box::new(ty), Box::new(expr1), Box::new(expr2))
-            });
-
-        let r#let = just_skip_comments(Token::Let)
-            .ignore_then(var_and_type.clone())
-            .then_ignore(just_skip_comments(Token::Eq))
-            .then(expr.clone())
-            .then_ignore(just_skip_comments(Token::SemiColon))
-            .then(expr.clone())
-            .map(|(((var, ty), expr1), expr2)| {
-                SugarExpr::LetIn(var, Box::new(ty), Box::new(expr1), Box::new(expr2))
-            });
-
-        let lambda = just_skip_comments(Token::Lambda)
-            .ignore_then(
-                var_and_type
-                    .clone()
-                    .separated_by(just_skip_comments(Token::Comma))
-                    .collect::<Vec<_>>()
-                    .delimited_by(
-                        just_skip_comments(Token::LParen),
-                        just_skip_comments(Token::RParen),
-                    ),
-            )
-            .then_ignore(just_skip_comments(Token::Arrow))
+        // fn (x: y) (b: y) -> body)
+        let lambda = just(Token::Fn)
+            .ignore_then(lambda_arg.repeated().at_least(1).collect::<MySmallVec<_>>())
+            .then_ignore(just(Token::Arrow))
             .then(expr.clone()) // Body (can be any expr)
-            .map(|(params, body)| {
-                if params.len() == 1 {
-                    let (name, ty) = params.into_iter().next().unwrap();
-                    SugarExpr::Lambda(name, Box::new(ty), Box::new(body))
-                } else if params.len() > 1 {
-                    todo!()
-                    // SugarExpr::MultiLambda(params, Box::new(body))
-                } else {
-                    unreachable!()
-                }
-            });
+            .map(|(params, body)| SugarExpr::MultiLambda(params, Box::new(body)));
 
-        let sigma = just_skip_comments(Token::LParen)
-            .ignore_then(var_and_type.clone().delimited_by(
-                just_skip_comments(Token::LParen),
-                just_skip_comments(Token::RParen),
-            )) // Parameter name
-            .then_ignore(just_skip_comments(Token::RParen))
-            .then_ignore(just_skip_comments(Token::Star))
-            .then(expr.clone()) // Second type (can be any expr)
-            .map(|((name, ty), second_type)| {
-                SugarExpr::Sigma(name, Box::new(ty), Box::new(second_type))
-            });
+        // let recover_let = any()
+        //     .and_is(just(Token::SemiColon).or(just(Token::Let)).not())
+        //     .repeated()
+        //     .ignore_then(just(Token::SemiColon))
+        //     .ignore_then(expr.clone())
+        //     .map(|expr| Err(ExprError::FailedLet(Box::new(expr))));
+        //
 
-        // no fancy pair syntax for now
-        // let pair = just_skip_comments(Token::LParen)
-        //     .ignore_then(expr.clone()) // First value (can be any expr)
-        //     .then_ignore(just_skip_comments(Token::Comma))
-        //     .then(expr.clone()) // Second value (can be any expr)
-        //     .then_ignore(just_skip_comments(Token::RParen))
-        //     .map(|(val1, val2)| Expr::Pair(Box::new(val1), Box::new(val2)));
+        let r#let = just(Token::Let).ignore_then(
+            var_and_type
+                .clone()
+                .then_ignore(just(Token::Eq))
+                .then(expr.clone())
+                .then_ignore(just(Token::SemiColon))
+                .then(expr.clone())
+                .map(|(((var, ty), expr1), expr2)| {
+                    Ok(SugarExpr::LetIn(
+                        var,
+                        Box::new(ty),
+                        Box::new(expr1),
+                        Box::new(expr2),
+                    ))
+                }), // .or(recover_let),
+        );
 
-        // --- 4. Equality (Lowest Precedence Operator) ---
-        // Equality takes any `expr` for its LHS, RHS, and Type.
-        // This is the lowest precedence operator, so it appears first in the `choice`.
-        // this means the rhs and the type cannot be an equality expression if we want this we need
-        // fold
+        let pi_arg = choice((
+            var_and_type
+                .clone()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|(name, ty)| (Some(name), Box::new(ty))),
+            expr.clone().map(|ty| (None, Box::new(ty))),
+        ));
 
-        // --- 6. Atom (Highest Precedence Base Expressions) ---
-        // 'Atoms' are expressions that contain no ambiguity
+        let pi = just(Token::Pi)
+            .ignore_then(pi_arg.repeated().at_least(1).collect::<MySmallVec<_>>())
+            .then_ignore(just(Token::Arrow))
+            .then(expr.clone())
+            .map(|(params, ret)| SugarExpr::MultiPi(params, Box::new(ret)));
 
-        let atom = ident
-            .map(SugarExpr::Var)
-            .or(let_in)
-            .or(r#let)
-            .or(lambda)
-            .or(sigma)
-            .or(r#type)
-            .or(paren_expr)
-            .map_with(|expr, e| SpannedSugarExpr((expr, e.span())));
+        let atom = choice((
+            r#let,
+            choice((ident.map(SugarExpr::Var), lambda, r#type, paren_expr)).map(|expr| Ok(expr)),
+        ))
+        .map_with(|expr, e| SpannedResultSugarExpr((expr, e.span())));
 
-        // --- 6. operator precedence forms (Highest binding powers first)
-        // Application (Left-Associative Operator)
-        let app = atom
-            .clone() // The function being applied (e.g., `f`)
-            // `foldl` repeatedly parses `projection`s as arguments.
-            // This ensures `f x y` parses as `(f x) y`.
-            .foldl_with(atom.repeated(), |acc, arg, e| {
-                SpannedSugarExpr((SugarExpr::App(Box::new(acc), Box::new(arg)), e.span()))
-            });
+        // --- operator precedence forms (Highest binding powers first)
+        let app = atom.clone().foldl_with(atom.repeated(), |acc, arg, e| {
+            SpannedResultSugarExpr((Ok(SugarExpr::App(Box::new(acc), Box::new(arg))), e.span()))
+        });
 
         let pipe = app.clone().foldl_with(
-            just_skip_comments(Token::Pipe).ignore_then(app).repeated(),
+            just(Token::Pipe).ignore_then(app).repeated(),
             |acc, arg, e| {
-                SpannedSugarExpr((SugarExpr::Pipe(Box::new(acc), Box::new(arg)), e.span()))
+                SpannedResultSugarExpr((
+                    Ok(SugarExpr::Pipe(Box::new(acc), Box::new(arg))),
+                    e.span(),
+                ))
             },
         );
 
-        let pi = var_and_type
-            .clone()
-            .delimited_by(
-                just_skip_comments(Token::LParen),
-                just_skip_comments(Token::RParen),
-            )
-            .map(Either::Left)
-            .or(pipe.clone().map(Either::Right))
-            .then_ignore(just_skip_comments(Token::Arrow))
-            .repeated()
-            .foldr_with(
-                pipe.clone(),
-                // param is the recursive one
-                |param, ret_ty, e| match param {
-                    Either::Left((name, ty)) => SpannedSugarExpr((
-                        SugarExpr::Pi(name, Box::new(ty), Box::new(ret_ty)),
-                        e.span(),
-                    )),
-                    //TODO: Should this be parsed as a different node since it is effectively
-                    // just another syntactic sugar
-                    Either::Right(ty) => SpannedSugarExpr((
-                        SugarExpr::Pi(String::new(), Box::new(ty), Box::new(ret_ty)),
-                        e.span(),
-                    )),
-                },
-            );
+        pipe
 
-        // type ann
-        let ann = pi.clone().foldl_with(
-            just_skip_comments(Token::Colon)
-                .ignore_then(pipe)
-                .repeated(),
-            |val, ty, e| SpannedSugarExpr((SugarExpr::Ann(Box::new(val), Box::new(ty)), e.span())),
-        );
-
-        ann.then_ignore(skip_comments)
-            .or(skip_comments.map_with(|_, e| SpannedSugarExpr((SugarExpr::Type, e.span()))))
+        // let ann = pi.clone().foldl_with(
+        //     just(Token::Colon).ignore_then(pi).repeated(),
+        //     |val, ty, e| {
+        //         SpannedResultSugarExpr((Ok(SugarExpr::Ann(Box::new(val), Box::new(ty))), e.span()))
+        //     },
+        // );
+        //
+        // ann
     })
+}
+
+impl<T> IntoIterator for SugarExpr<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            SugarExpr::Var(_) | SugarExpr::Type => vec![].into_iter(),
+
+            SugarExpr::App(a, b) | SugarExpr::Pipe(a, b) => vec![a, b].into_iter(),
+
+            SugarExpr::Ann(ty, body) => vec![ty, body].into_iter(),
+            SugarExpr::Group(body) => vec![body].into_iter(),
+
+            SugarExpr::MultiLambda(args, body) => {
+                todo!()
+            }
+            SugarExpr::MultiPi(args, body) => {
+                todo!()
+            }
+
+            SugarExpr::LetIn(_, ty, val, body) => vec![ty, val, body].into_iter(),
+        }
+    }
 }
