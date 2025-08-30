@@ -1,7 +1,12 @@
 // T should be a wrapper around Expr like F<Expr>
-// our compiler goes from text -> tokens -> sugar_ast -> typed_sugar_ast -> core
+// this is incredibly important for a streaming parser
+// instead of going text -> tokens -> sugar_ast -> hash cons
+// and building the full structure at each step we can also choose to stream instead. This
+// massively improve memory usage and cache locality
 // Var is stored as Debruijn indices.
-// TODO: explore using NodeId of the lambda itself instead of Debruijn indices.
+// TODO: Explore removing Var from the enum and instead make T be Either<Box<Expr<..>, Var> this
+// way vars are not standalone expressions
+//
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<T> {
     Var { idx: usize },

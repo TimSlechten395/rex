@@ -10,6 +10,7 @@ pub type Var = String;
 
 // This could have a variant Common(Expr<SugarExpr>). But we need lambda, pi and var seperate
 // anyway
+// TODO: Is this even worth it to have? We could just parse straight to core calculus no?
 #[derive(Debug, Clone, PartialEq)]
 pub enum SugarExpr<T> {
     Var(Var),
@@ -64,6 +65,7 @@ pub fn full_parser<'a>()
 pub type Span = SimpleSpan;
 
 // TODO: Handle comments better
+// Explore combining passes: text -> tokens -> ast -> hash_cons all in one go
 pub fn parser<'tokens, 'src: 'tokens>()
 -> impl Parser<'tokens, &'tokens [Token], SpannedSugarExpr, extra::Err<Rich<'tokens, Token>>> + Clone
 {
@@ -75,6 +77,7 @@ pub fn parser<'tokens, 'src: 'tokens>()
         let r#type = skip_comments
             .clone()
             .ignore_then(just(Token::Type).to(SugarExpr::Type));
+        // same as base
 
         let ident = skip_comments.clone().ignore_then(select! {
         Token::Ident(name) => name});
@@ -104,11 +107,22 @@ pub fn parser<'tokens, 'src: 'tokens>()
             ))
             .map(|body| SugarExpr::Loop(Box::new(body)));
 
-        let r#let = just_skip_comments(Token::Let)
+        // TODO: is it worth it to have both?
+        let let_in = just_skip_comments(Token::Let)
             .ignore_then(var_and_type.clone())
             .then_ignore(just_skip_comments(Token::Eq))
             .then(expr.clone())
             .then_ignore(just_skip_comments(Token::In))
+            .then(expr.clone())
+            .map(|(((var, ty), expr1), expr2)| {
+                SugarExpr::LetIn(var, Box::new(ty), Box::new(expr1), Box::new(expr2))
+            });
+
+        let r#let = just_skip_comments(Token::Let)
+            .ignore_then(var_and_type.clone())
+            .then_ignore(just_skip_comments(Token::Eq))
+            .then(expr.clone())
+            .then_ignore(just_skip_comments(Token::SemiColon))
             .then(expr.clone())
             .map(|(((var, ty), expr1), expr2)| {
                 SugarExpr::LetIn(var, Box::new(ty), Box::new(expr1), Box::new(expr2))
@@ -170,6 +184,7 @@ pub fn parser<'tokens, 'src: 'tokens>()
 
         let atom = ident
             .map(SugarExpr::Var)
+            .or(let_in)
             .or(r#let)
             .or(lambda)
             .or(sigma)

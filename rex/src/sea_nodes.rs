@@ -14,11 +14,11 @@ pub type ExprGraph = Expr<NodeId>;
 // invariant: id = reverse.get(nodes.get(id))
 // TODO: figure out of reference counting is usefull here
 // NOTE: We could cache this for incremental compilation but we need a way to get rid of dead code
-// which means we need reference counting
+// which means we need reference counting. We could store an extra HashMap<NodeId, Count> or we
+// could use Rc<ExprGraph>
 #[derive(Debug, Clone)]
 pub struct SeaOfNodes {
-    // could be HashMap<NodeId, Rc<ExprGraph>> but this does not make jfj
-    nodes: HashMap<NodeId, ExprGraph>,
+    nodes: HashMap<NodeId, (ExprGraph, usize)>,
     // this map was needed for sequential ids but now we just hash ExprGraph directly
     // reverse: HashMap<ExprGraph, NodeId>,
     // this is a substitution map for example the nodeId of add 5 4 points to the node_id of 9
@@ -46,15 +46,15 @@ impl SeaOfNodes {
         let hash = hasher.finish();
         match self.nodes.entry(hash) {
             Entry::Vacant(v) => {
-                v.insert(node);
+                v.insert((node, 1));
             }
-            Entry::Occupied(_) => (),
+            Entry::Occupied(mut o) => o.get_mut().1 += 1,
         }
         hash
     }
 
     pub fn get_node(&self, id: NodeId) -> Option<&ExprGraph> {
-        self.nodes.get(&id)
+        self.nodes.get(&id).map(|x| &x.0)
     }
 }
 
@@ -63,7 +63,13 @@ impl SeaOfNodes {
 // TODO: stupid idea let Expr::Var contain id of the lambda it is bound to.
 // That does not work we get the id by hashing. and we need DeBruijn index anyway for
 // uniqueness.
-fn lower_expr(ast: &ExprTree, sea: &mut SeaOfNodes) -> NodeId {
+// HACK: We are adding variables to the sea of nodes but Var with an index is absolutely not
+// unique it just makes it so comparing lambdas is just comparing hashes.
+// NOTE: The longer I think about this, it feels like the only correct way to implement. I tried
+// unique indices but you never succeed in hashconsing lambdas
+// TODO: If somehow we could link it back to the lambda it comes from we can store type information
+// next to Vars but I guess the lambda stores Var anyway?
+pub fn lower_expr(ast: &ExprTree, sea: &mut SeaOfNodes) -> NodeId {
     match &**ast {
         Expr::Var { idx } => sea.add_node(ExprGraph::Var { idx: *idx }),
         Expr::App { func, arg } => {
@@ -244,6 +250,7 @@ pub enum TypeError {
 // would not be a problem
 // TODO: check if is is possible to use a generic Expr<T> instead. I assume it is impossible
 // because there is no generic way to traverse the expression.
+// HACK: variables are a special since they rely on the type of the lambda to be know
 pub fn infer_type(
     expr: NodeId,
     sea: &mut SeaOfNodes,
@@ -252,7 +259,7 @@ pub fn infer_type(
 ) -> Result<NodeId, TypeError> {
     let expr = sea.get_node(expr).unwrap().clone();
     match expr {
-        // do NOT include this is the TypeContext as
+        // do NOT include this in the Sea as we
         Expr::Var { idx } => {
             if let Some(ty) = vars_tys.iter().rev().nth(idx) {
                 Ok(*ty)
