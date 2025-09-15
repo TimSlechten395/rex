@@ -124,7 +124,15 @@ impl LanguageServer for Backend {
 
     // Simple hover: show a fixed message.
     async fn hover(&self, params: HoverParams) -> jsonrpc::Result<Option<Hover>> {
-        hover::hover(self, params).await
+        match hover::hover(self, params).await {
+            Ok(hover) => Ok(hover),
+            Err(e) => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Failed hover request: {:?}", e))
+                    .await;
+                Ok(None)
+            }
+        }
     }
 
     async fn semantic_tokens_full(
@@ -134,9 +142,19 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "computing tokens")
             .await;
-        // let result = semantic_tokens_full(&self, params.clone()).await;
+        let result = match semantic_tokens_full(&self, params.clone()).await {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("failed to acquire semantic tokens: {:?}", e),
+                    )
+                    .await;
+                Ok(None)
+            }
+        };
 
-        let result = Ok(None);
         self.client
             .log_message(MessageType::INFO, "done computing tokens")
             .await;

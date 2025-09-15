@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use rex::{ErrorToken, Token};
 use tower_lsp_server::{
     jsonrpc,
@@ -29,11 +29,11 @@ pub fn token_index(token: &Result<Token, ErrorToken>) -> u32 {
             Token::Number(_) => 3,
             Token::Ident(_) => 2,
             Token::String(_) => 12,
-            Token::Fn => 0,
             Token::Dot => 1,
             Token::Colon => 1,
             Token::SemiColon => 1,
             Token::Arrow => 1,
+            Token::DoubleArrow => 1,
             Token::Pipe => 1,
             Token::Star => 1,
             Token::Comma => 1,
@@ -47,18 +47,20 @@ pub fn token_index(token: &Result<Token, ErrorToken>) -> u32 {
             // Token::Cdr => todo!(),
             Token::Eq => 1,
             // Token::Cons => todo!(),
+            Token::Fn => 0,
             Token::Loop => 0,
             Token::While => 0,
             Token::For => 0,
             Token::Break => 0,
             Token::Let => 0,
             Token::In => 0,
-            _ => todo!(),
+            _ => 0,
         },
         Err(e) => match e {
             ErrorToken::Comment(_) => 11,
             ErrorToken::ErrorToken(_) => 14,
             ErrorToken::Space(_) => 15,
+            ErrorToken::NewLine(_) => 15,
         },
     }
 }
@@ -103,19 +105,19 @@ pub fn semantic_tokens_legend() -> SemanticTokensLegend {
 pub async fn semantic_tokens_full(
     backend: &Backend,
     params: SemanticTokensParams,
-) -> tower_lsp_server::jsonrpc::Result<Option<SemanticTokensResult>> {
+) -> anyhow::Result<Option<SemanticTokensResult>> {
     let uri = params.text_document.uri;
     let Some(text) = backend.files.get(&uri) else {
-        return Err(jsonrpc::Error::internal_error());
+        bail!("Failed to get text")
     };
 
     let Some(tokens) = backend.tokens.get(&uri) else {
-        return Err(jsonrpc::Error::internal_error());
+        bail!("Failed to get tokens")
     };
 
-    let Some(sugar_ast) = backend.sugar_asts.get(&uri) else {
-        return Err(jsonrpc::Error::internal_error());
-    };
+    // let Some(sugar_ast) = backend.sugar_asts.get(&uri) else {
+    //     bail!("Failed to get ast")
+    // };
 
     let tokens = tokens.clone();
 
@@ -129,7 +131,7 @@ pub async fn semantic_tokens_full(
 
         let line = text.char_to_line(start);
         let line_start = text.line_to_char(line);
-        let column = end - line_start;
+        let column = start - line_start;
 
         // Yes delta_start that make so much sense. why was indexing not enough?
         let delta_line = (line - prev_line) as u32;
@@ -140,7 +142,7 @@ pub async fn semantic_tokens_full(
             column
         } as u32;
 
-        let length = (token.1.end - token.1.start) as u32;
+        let length = (end - start) as u32;
 
         let token_type = token_index(&token.0);
 

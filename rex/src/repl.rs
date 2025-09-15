@@ -1,7 +1,5 @@
 use chumsky::{prelude::*, text::ascii::ident};
 
-use crate::{SugarExpr, Token};
-
 // pub fn get_definition<'a>()
 // -> impl Parser<'a, &'a [Token], ((String, SugarExpr), SugarExpr), extra::Err<Rich<'a, Token>>> {
 //     let ident = select! {

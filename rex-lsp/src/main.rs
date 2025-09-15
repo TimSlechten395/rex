@@ -20,4 +20,6 @@ async fn main() {
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(service)
         .await;
+
+    eprintln!("ended server");
 }

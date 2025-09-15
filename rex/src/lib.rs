@@ -1,6 +1,3 @@
-pub mod eval;
-pub use eval::*;
-
 pub use lexer::*;
 pub use rex_parser::lexer;
 
@@ -12,6 +9,7 @@ pub use rex_core::*;
 
 pub mod desugar;
 pub use desugar::*;
+pub mod eval;
 
 pub mod experimental;
 

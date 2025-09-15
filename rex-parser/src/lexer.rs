@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use chumsky::prelude::*;
 use chumsky::span::SimpleSpan;
 use chumsky::text::{digits, ident, newline, whitespace};
@@ -15,6 +17,7 @@ pub enum ErrorToken {
     // HACK: Comments are not really errors
     Comment(String),
     Space(usize),
+    NewLine(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,11 +27,11 @@ pub enum Token {
     String(String), // 'atoms
 
     Fn,        // 'fn'
-    Pi,        // 'pi'
     Dot,       // '.'
     Colon,     // ':'
     SemiColon, // ';'
     Arrow,     // "->"
+    DoubleArrow,
     Pipe,
     Star,   // '*'
     Comma,  // ','
@@ -41,16 +44,7 @@ pub enum Token {
 
     Type,
 
-    Car, // "proj1"
-    Cdr, // "proj2"
-
     Eq, // "="
-    // keywords
-    Cons,
-    Pair,
-    Claim,
-    Define,
-    Just,
 
     // sugar keywords
     Loop,
@@ -59,6 +53,43 @@ pub enum Token {
     Break,
     Let,
     In,
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Ident(name) => write!(f, "{}", name),
+            Token::Number(num) => write!(f, "{}", num),
+            Token::String(s) => write!(f, "\"{}\"", s),
+
+            Token::Fn => write!(f, "fn"),
+            Token::Dot => write!(f, "."),
+            Token::Colon => write!(f, ":"),
+            Token::SemiColon => write!(f, ";"),
+            Token::Arrow => write!(f, "->"),
+            Token::DoubleArrow => write!(f, "=>"),
+            Token::Pipe => write!(f, "|"),
+            Token::Star => write!(f, "*"),
+            Token::Comma => write!(f, ","),
+            Token::LParen => write!(f, "("),
+            Token::RParen => write!(f, ")"),
+            Token::LBrace => write!(f, "{{"),
+            Token::RBrace => write!(f, "}}"),
+            Token::LBracket => write!(f, "["),
+            Token::RBracket => write!(f, "]"),
+
+            Token::Type => write!(f, "Type"),
+
+            Token::Eq => write!(f, "="),
+
+            Token::Loop => write!(f, "loop"),
+            Token::While => write!(f, "while"),
+            Token::For => write!(f, "for"),
+            Token::Break => write!(f, "break"),
+            Token::Let => write!(f, "let"),
+            Token::In => write!(f, "in"),
+        }
+    }
 }
 
 // type Span = std::ops::Range<usize>;
@@ -89,9 +120,9 @@ pub fn lexer<'a>()
     // Keywords
     // Why does lambda need to be between ""?
     let lambda = text::keyword("fn").to(Token::Fn);
-    let pi = text::keyword("pi").to(Token::Pi);
 
     let arrow = just('-').then_ignore(just('>')).to(Token::Arrow);
+    let double_arrow = just('=').then_ignore(just('>')).to(Token::DoubleArrow);
 
     let number = number_parser().map(Token::Number);
 
@@ -120,8 +151,6 @@ pub fn lexer<'a>()
         // "cdr" => Token::Cdr,
         // "cons" => Token::Cons,
         // "Pair" => Token::Pair,
-        "claim" => Token::Claim,
-        "define" => Token::Define,
         "Type" => Token::Type,
         // "just" => Token::Just,
         "loop" => Token::Loop,
@@ -141,16 +170,36 @@ pub fn lexer<'a>()
     let comment_content = any().and_is(newline().or(end()).not()).repeated().collect();
 
     // Token parser: choice of all tokens, with whitespace trimmed around
-    let token = choice((lambda, pi, base, arrow, string, number, ident, pipe))
-        .map_with(|token, e| (Ok(token), e.span()))
-        .padded();
+    let token = choice((
+        arrow,
+        double_arrow,
+        lambda,
+        base,
+        string,
+        number,
+        ident,
+        pipe,
+    ))
+    .map_with(|token, e| (Ok(token), e.span()));
+
+    // inert tokens
+    let space = whitespace()
+        .at_least(1)
+        .count()
+        .map_with(|amount, e| (Err(ErrorToken::Space(amount)), e.span()));
+
+    let newline = newline()
+        .repeated()
+        .at_least(1)
+        .count()
+        .map_with(|amount, e| (Err(ErrorToken::NewLine(amount)), e.span()));
 
     let comment = just("//")
         .ignore_then(comment_content)
         .map_with(|content, e| (Err(ErrorToken::Comment(content)), e.span()));
 
     let invalid = any().map_with(|c, e| (Err(ErrorToken::ErrorToken(c)), e.span()));
-    let error = comment.or(invalid);
+    let error = choice((space, newline, comment, invalid));
 
     token.or(error).repeated().collect::<Vec<_>>()
 }

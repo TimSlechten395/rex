@@ -12,3 +12,5 @@ rustyline = "16.0.0"
 rex-parser = { path = "../rex-parser" }
 rex-core = { path = "../rex-core" }
 anyhow = "1.0.99"
+thiserror = "2.0.16"
+functor_derive = "0.4.3"
