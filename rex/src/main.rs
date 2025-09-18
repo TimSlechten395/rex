@@ -25,7 +25,14 @@ fn main() -> anyhow::Result<()> {
         .into_result()
         .map_err(|e| anyhow!("failed to parse file: {:?}", e))?;
 
-    let good_toks: Vec<_> = toks.into_iter().filter_map(|x| Result::ok(x.0)).collect();
+    let good_toks: Vec<_> = toks
+        .into_iter()
+        .filter_map(|x| Result::ok(x.0))
+        .filter_map(|x| match x {
+            rex::Token::RealToken(real_token) => Some(real_token),
+            rex::Token::InertToken(_) => None,
+        })
+        .collect();
     println!(
         "got tokens: {:#?}",
         good_toks.iter().enumerate().collect::<Vec<_>>()

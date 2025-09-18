@@ -6,8 +6,9 @@ use chumsky::{container::Container, input::ValueInput, prelude::*};
 use either::Either::{self, Right};
 use functor_derive::Functor;
 use std::fmt;
+use thiserror::Error;
 
-use crate::lexer::Token;
+use crate::lexer::RealToken;
 
 // Later all idents will become syntactic sugar for indices
 
@@ -39,7 +40,7 @@ pub enum SugarExpr<T> {
 }
 
 impl<T: Clone> SugarExpr<T> {
-    fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
+    pub fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
         match &self {
             SugarExpr::Var(_) => init,
             SugarExpr::App(a, b) => f(f(init, a.clone()), b.clone()),
@@ -68,33 +69,22 @@ impl<T: Clone> SugarExpr<T> {
     }
 }
 
-pub fn find_node(expr: SpannedResultSugarExpr, idx: usize) -> Option<SpannedResultSugarExpr> {
-    if let Some(node) = fold(expr.0.0, None, |acc, t| {
-        acc.or_else(|| {
-            if t.0.1.into_range().contains(&idx) {
-                Some(*t)
-            } else {
-                None
-            }
-        })
-    }) {
-        Some(find_node(node.clone(), idx).unwrap_or(node))
-    } else {
-        None
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Functor)]
+#[derive(Debug, Clone, PartialEq, Functor, Error)]
 pub enum ExprError<T> {
-    InvalidExpr(Token),
+    #[error("Invalid expression: found tokens {0:?}")]
+    InvalidExpr(Vec<RealToken>),
+
+    #[error("malformed let binding")]
     FailedLet(T),
+
+    #[error("unexpected error")]
     Other(T),
 }
 
 impl<T: Clone> ExprError<T> {
     pub fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
         match &self {
-            ExprError::InvalidExpr(token) => init,
+            ExprError::InvalidExpr(_) => init,
             ExprError::FailedLet(a) => f(init, a.clone()),
             ExprError::Other(a) => f(init, a.clone()),
         }
@@ -282,6 +272,151 @@ impl fmt::Debug for SpannedResultSugarExpr {
 }
 
 impl SpannedResultSugarExpr {
+    // some of the worst code I have ever written
+    pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
+        let range = self.0.1.into_range();
+        if range.contains(&token_index) {
+            match self.0.0.clone() {
+                Ok(node) => match node {
+                    SugarExpr::App(a, b) => a
+                        .search(token_index)
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or_else(|| {
+                            b.search(token_index).map(|mut x| {
+                                x.push(1);
+                                x
+                            })
+                        })
+                        .or(Some(Vec::new())),
+                    SugarExpr::Ann(a, b) => a
+                        .search(token_index)
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or_else(|| {
+                            b.search(token_index).map(|mut x| {
+                                x.push(1);
+                                x
+                            })
+                        })
+                        .or(Some(Vec::new())),
+                    SugarExpr::Group(a) => a
+                        .search(token_index)
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or(Some(Vec::new())),
+                    SugarExpr::MultiLambda(items, second) => items
+                        .into_iter()
+                        .enumerate()
+                        .fold(None, |acc, (i, item)| {
+                            if acc.is_none() {
+                                if let Some(item) = item.1 {
+                                    item.search(token_index).map(|mut x| {
+                                        x.push(i);
+                                        x
+                                    })
+                                } else {
+                                    acc
+                                }
+                            } else {
+                                acc
+                            }
+                        })
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or_else(|| {
+                            second.search(token_index).map(|mut x| {
+                                x.push(1);
+                                x
+                            })
+                        })
+                        .or(Some(Vec::new())),
+
+                    SugarExpr::MultiPi(items, second) => items
+                        .into_iter()
+                        .enumerate()
+                        .fold(None, |acc, (i, item)| {
+                            if acc.is_none() {
+                                item.1.search(token_index).map(|mut x| {
+                                    x.push(i);
+                                    x
+                                })
+                            } else {
+                                acc
+                            }
+                        })
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or_else(|| {
+                            second.search(token_index).map(|mut x| {
+                                x.push(1);
+                                x
+                            })
+                        })
+                        .or(Some(Vec::new())),
+                    SugarExpr::LetIn(_, a, b, c) => a
+                        .search(token_index)
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or_else(|| {
+                            b.search(token_index).map(|mut x| {
+                                x.push(1);
+                                x
+                            })
+                        })
+                        .or_else(|| {
+                            c.search(token_index).map(|mut x| {
+                                x.push(2);
+                                x
+                            })
+                        })
+                        .or(Some(Vec::new())),
+                    SugarExpr::Pipe(a, b) => a
+                        .search(token_index)
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or_else(|| {
+                            b.search(token_index).map(|mut x| {
+                                x.push(1);
+                                x
+                            })
+                        })
+                        .or(Some(Vec::new())),
+                    _ => Some(Vec::new()),
+                },
+                Err(node) => match node {
+                    ExprError::FailedLet(a) => a
+                        .search(token_index)
+                        .map(|mut x| {
+                            x.push(0);
+                            x
+                        })
+                        .or(Some(Vec::new())),
+                    ExprError::Other(a) => a.search(token_index).map(|mut x| {
+                        x.push(0);
+                        x
+                    }),
+                    _ => Some(Vec::new()),
+                },
+            }
+        } else {
+            None
+        }
+    }
     pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
         let ok = self
             .clone()
@@ -291,21 +426,21 @@ impl SpannedResultSugarExpr {
         let current = path.pop();
         match current {
             Some(cur) => match ok {
-                SugarExpr::Var(_) => bail!("invalid path"),
+                SugarExpr::Var(_) => bail!("invalid path in var"),
                 SugarExpr::App(f, a) => match cur {
                     0 => f.traverse(path),
                     1 => a.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in app"),
                 },
-                SugarExpr::Type => bail!("invalid path"),
+                SugarExpr::Type => bail!("invalid path in type: {path:?}"),
                 SugarExpr::Ann(e, a) => match cur {
                     0 => e.traverse(path),
                     1 => a.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in ann"),
                 },
                 SugarExpr::Group(e) => match cur {
                     0 => e.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in group"),
                 },
                 SugarExpr::MultiLambda(items, body) => match cur {
                     0 => {
@@ -327,7 +462,7 @@ impl SpannedResultSugarExpr {
                         }
                     }
                     1 => body.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in multilambda"),
                 },
 
                 SugarExpr::MultiPi(items, ret_ty) => match cur {
@@ -346,18 +481,18 @@ impl SpannedResultSugarExpr {
                         }
                     }
                     1 => ret_ty.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in multipi"),
                 },
                 SugarExpr::LetIn(_, ty, val, body) => match cur {
                     0 => ty.traverse(path),
                     1 => val.traverse(path),
                     2 => body.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in 'let in '"),
                 },
                 SugarExpr::Pipe(f, a) => match cur {
                     0 => f.traverse(path),
                     1 => a.traverse(path),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in pipe"),
                 },
             },
 
@@ -384,52 +519,47 @@ pub fn remove_span(expr: SpannedResultSugarExpr) -> ResultSugarExpr {
 pub type Span = SimpleSpan;
 
 // TODO: Use recursion schemes
-pub fn parser<'tokens, 'src: 'tokens>()
--> impl Parser<'tokens, &'tokens [Token], SpannedResultSugarExpr, extra::Err<Rich<'tokens, Token>>>
-+ Clone {
+pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    &'tokens [RealToken],
+    SpannedResultSugarExpr,
+    extra::Err<Rich<'tokens, RealToken>>,
+> + Clone {
     recursive(|expr| {
         // `expr` represents the *entire* expression grammar
         // --- 1. Basic Tokens ---
-        let r#type = just(Token::Type).to(SugarExpr::Type);
+        let r#type = just(RealToken::Type).to(SugarExpr::Type);
         // same as base
 
         let ident = select! {
-        Token::Ident(name) => name
+        RealToken::Ident(name) => name
         };
 
         let paren_expr = expr
             .clone()
-            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .delimited_by(just(RealToken::LParen), just(RealToken::RParen))
             .map(|x| SugarExpr::Group(Box::new(x)));
 
         let var_and_type = ident
             .clone()
-            .then_ignore(just(Token::Colon))
+            .then_ignore(just(RealToken::Colon))
             .then(expr.clone());
 
         // type annotation is optional
         let lambda_arg = choice((
             var_and_type
                 .clone()
-                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .delimited_by(just(RealToken::LParen), just(RealToken::RParen))
                 .map(|(name, ty)| (name, Some(Box::new(ty)))),
             ident.clone().map(|name| (name, None)),
         ));
 
         // fn (x: y) (b: y) => body)
-        let lambda = just(Token::Fn)
+        let lambda = just(RealToken::Fn)
             .ignore_then(lambda_arg.repeated().at_least(1).collect::<Vec<_>>())
-            .then_ignore(just(Token::DoubleArrow))
+            .then_ignore(just(RealToken::DoubleArrow))
             .then(expr.clone()) // Body (can be any expr)
             .map(|(params, body)| SugarExpr::MultiLambda(params, Box::new(body)));
-
-        // let recover_let = any()
-        //     .and_is(just(Token::SemiColon).or(just(Token::Let)).not())
-        //     .repeated()
-        //     .ignore_then(just(Token::SemiColon))
-        //     .ignore_then(expr.clone())
-        //     .map(|expr| Err(ExprError::FailedLet(Box::new(expr))));
-        //
 
         let atom = choice((ident.map(SugarExpr::Var), lambda, r#type, paren_expr))
             .map(|expr| Ok(expr))
@@ -441,7 +571,7 @@ pub fn parser<'tokens, 'src: 'tokens>()
         });
 
         let pipe = app.clone().foldl_with(
-            just(Token::Pipe).ignore_then(app).repeated(),
+            just(RealToken::Pipe).ignore_then(app).repeated(),
             |acc, arg, e| {
                 SpannedResultSugarExpr((
                     Ok(SugarExpr::Pipe(Box::new(acc), Box::new(arg))),
@@ -453,13 +583,13 @@ pub fn parser<'tokens, 'src: 'tokens>()
         let pi_arg = choice((
             var_and_type
                 .clone()
-                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .delimited_by(just(RealToken::LParen), just(RealToken::RParen))
                 .map(|(name, ty)| (Some(name), Box::new(ty))),
             pipe.clone().map(|ty| (None, Box::new(ty))),
         ));
 
         let pi = pi_arg
-            .then_ignore(just(Token::Arrow))
+            .then_ignore(just(RealToken::Arrow))
             .repeated()
             .collect::<Vec<(Option<String>, Box<SpannedResultSugarExpr>)>>()
             .then(pipe.clone())
@@ -474,14 +604,22 @@ pub fn parser<'tokens, 'src: 'tokens>()
                 }
             });
 
+        let recover_let = any()
+            .and_is(just(RealToken::SemiColon).or(just(RealToken::Let)).not())
+            .repeated()
+            .ignore_then(just(RealToken::SemiColon))
+            .ignore_then(expr.clone())
+            .map(|expr| Err(ExprError::FailedLet(Box::new(expr))))
+            .map_with(|expr, e| SpannedResultSugarExpr((expr, e.span())));
+
         // TODO: If we make let an atom the parser seems to blow up. Figure out why this is the
         // case
-        let r#let = just(Token::Let).ignore_then(
+        let r#let = just(RealToken::Let).ignore_then(
             var_and_type
                 .clone()
-                .then_ignore(just(Token::Eq))
+                .then_ignore(just(RealToken::Eq))
                 .then(expr.clone())
-                .then_ignore(just(Token::SemiColon))
+                .then_ignore(just(RealToken::SemiColon))
                 .then(expr.clone())
                 .map_with(|(((var, ty), expr1), expr2), e| {
                     SpannedResultSugarExpr((
@@ -493,7 +631,8 @@ pub fn parser<'tokens, 'src: 'tokens>()
                         )),
                         e.span(),
                     ))
-                }), // .or(recover_let),
+                })
+                .or(recover_let),
         );
         choice((pi, r#let))
 

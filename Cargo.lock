@@ -726,6 +726,7 @@ dependencies = [
  "functor_derive",
  "rex-core",
  "smallvec",
+ "thiserror",
 ]
 
 [[package]]

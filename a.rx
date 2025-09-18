@@ -2,8 +2,8 @@
 
 // 1: Unit type and value also called top
 let Unit: Type = (A: Type) -> A -> A;
-let unit: Unit = fn (A: Type) (x: A) => x;
 
+let unit: Unit = fn (A: Type) (x: A) => x;
 let Never: Type = fn (A: Type) => A;
 Type
 

@@ -1,11 +1,8 @@
 use anyhow::bail;
-use rex::{desugar, find_node, get_normal_expr, remove_span, sea_nodes::lower_expr};
-use tower_lsp_server::{
-    jsonrpc,
-    lsp_types::{Hover, HoverContents, HoverParams, MarkedString},
-};
+use rex::Token;
+use tower_lsp_server::lsp_types::{Hover, HoverContents, HoverParams, MarkedString};
 
-use crate::Backend;
+use crate::{Backend, helper::map_index, semantic_tokens::semantic_token};
 
 // TODO: use anyhow error type instead of jsonrpc error
 pub async fn hover(backend: &Backend, params: HoverParams) -> anyhow::Result<Option<Hover>> {
@@ -35,31 +32,35 @@ pub async fn hover(backend: &Backend, params: HoverParams) -> anyhow::Result<Opt
 
     // TODO: This is quite slow we might need to store an extra map or even store a list of
     // valid tokens?
-    let message =
-        match &token.0 {
-            Ok(tok) => {
-                let ast_idx = tokens.iter().take(idx).fold(0, |count, value| {
-                    if value.0.is_ok() { count + 1 } else { count }
-                });
-                let Some(ast) = backend.sugar_asts.get(&uri) else {
-                    bail!("Failed to get ast. Got token: {:?}", tok)
-                };
+    let message = match &token.0 {
+        Ok(tok) => {
+            let ast_idx = map_index(&tokens, idx);
 
-                let Some(normal_ast) = get_normal_expr(remove_span(ast.clone())) else {
-                    bail!("invalid ast: {:?}", ast)
-                };
+            let Some(ast) = backend.sugar_asts.get(&uri) else {
+                bail!("Failed to get ast. Got token: {:?}", tok)
+            };
 
-                let node = find_node(ast.clone(), ast_idx);
+            // let Some(normal_ast) = get_normal_expr(remove_span(ast.clone())) else {
+            //     bail!("invalid ast: {:?}", ast)
+            // };
 
-                format!(
-                    "Found token {:?} with idx: {:?} in ast: {:?}",
-                    tok, ast_idx, node
-                )
-            }
-            Err(tok) => {
-                format!("Found illegal token: {:?}", tok)
-            }
-        };
+            let ast_path = ast_idx.map(|x| ast.clone().search(x));
+
+            let node = ast_path.clone().map(|x| x.map(|x| ast.clone().traverse(x)));
+
+            format!(
+                "Found token {:?} with idx: {:?} in ast: {:?} (path: {:?}), \n Semantics: {:?}",
+                tok,
+                ast_idx,
+                node,
+                ast_path,
+                semantic_token(ast.clone(), token.clone(), ast_idx)
+            )
+        }
+        Err(tok) => {
+            format!("Found illegal token: {:?}", tok)
+        }
+    };
 
     Ok(Some(Hover {
         contents: HoverContents::Scalar(MarkedString::String(message)),

@@ -20,6 +20,20 @@ pub enum Expr<T, A, B> {
     Type,
 }
 
+impl<T, A, B> Expr<T, A, B> {
+    pub fn fold<U>(expr: Expr<T, A, B>, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
+        match expr {
+            Expr::Var { .. } => init,
+            Expr::App { func, arg } => f(f(init, func), arg),
+            Expr::Lambda { param_ty, body, .. } => f(f(init, param_ty), body),
+            Expr::Pi {
+                param_ty, ret_ty, ..
+            } => f(f(init, param_ty), ret_ty),
+            Expr::Type => init,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprTree<A, B>(pub Expr<Box<ExprTree<A, B>>, A, B>);
 
@@ -128,17 +142,5 @@ impl<A: Display, B: Display> Display for ExprTree<A, B> {
             } => write!(f, "{} -> {}", param_ty, ret_ty),
             Expr::Type => write!(f, "Type"),
         }
-    }
-}
-
-pub fn fold<T: Clone, U, A, B>(expr: Expr<T, A, B>, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
-    match expr {
-        Expr::Var { idx } => init,
-        Expr::App { func, arg } => f(f(init, func), arg),
-        Expr::Lambda { param_ty, body, .. } => f(f(init, param_ty), body),
-        Expr::Pi {
-            param_ty, ret_ty, ..
-        } => f(f(init, param_ty), ret_ty),
-        Expr::Type => init,
     }
 }

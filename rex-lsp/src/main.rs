@@ -16,6 +16,7 @@ async fn main() {
         sugar_asts: Arc::new(DashMap::new()),
         core_asts: Arc::new(DashMap::new()),
         sea_of_nodes: Arc::new(Mutex::new(SeaOfNodes::new())),
+        diagnostics: Arc::new(Mutex::new(Vec::new())),
     });
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(service)
