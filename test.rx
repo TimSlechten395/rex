@@ -22,7 +22,7 @@ let true: Bool = fn (A: Type) (t: A) (f: A) => t;
 let false: Bool = fn (A: Type) (t: A) (f: A) => f;
 
 let Pair: (A: Type) -> (B: Type) -> Type = fn (A: Type) (B: Type) => ((C: Type) -> (A -> B -> C) -> C);
-let pair: (A: Type) -> (B: Type) -> A -> B -> Pair A B = fn (A: Type) (B: Type) (a: A) (b: B) => fn (C: Type) (f: A -> B -> C) => f a b;
+let pair: (A: Type) -> (B: Type) -> A -> B -> Pair A B = fn (A: Type) (B: Type) (a: A) (b: B)(C: Type) (f: A -> B -> C) => f a b;
 
 // These are the projections
 let fst: (A: Type) -> (B: Type) -> Pair A B -> A = fn (A: Type) (B: Type) (p: Pair A B) => p A (fn (a: A) (b: B) => a);

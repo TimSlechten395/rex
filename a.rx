@@ -1,9 +1,10 @@
 // Types use ... -> ... and functions fn ... => ...
 
 // 1: Unit type and value also called top
-let Unit: Type = (A: Type) -> A -> A;
+((A: Type) -> A -> A),
 
-let unit: Unit = fn (A: Type) (x: A) => x;
-let Never: Type = fn (A: Type) => A;
-Type
+(fn (A: Type) (x: A) => x),
+(fn (A: Type) => A),
+(Type, ((A: Type) -> A -> A), Type),
+
 

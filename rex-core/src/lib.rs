@@ -110,6 +110,30 @@ impl<A, B> SpannedExprTree<A, B> {
             None => Ok(self),
         }
     }
+
+    pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
+        //         let range = self.0.1.into_range();
+        //         if range.contains(&token_index) {
+        //             match self.0.0.clone() {
+        //                 Ok(node) => match node {
+        //                     SugarExpr::App(a, b) => a
+        //                         .search(token_index)
+        //                         .map(|mut x| {
+        //                             x.push(0);
+        //                             x
+        //                         })
+        //                         .or_else(|| {
+        //                             b.search(token_index).map(|mut x| {
+        //                                 x.push(1);
+        //                                 x
+        //                             })
+        //                         })
+        //                         .or(Some(Vec::new())),
+        //                     SugarExpr::Ann(a, b) => a
+        //                         .search(token_index)
+        //                         .map(|mut x| {
+    }
+
     pub fn remove_span(self) -> ExprTree<A, B> {
         let expr = self.0.0.fmap(|e| Box::new(e.remove_span()));
         ExprTree(expr)

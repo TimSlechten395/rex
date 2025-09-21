@@ -1,0 +1,60 @@
+// Types use ... -> ... and functions fn ... => ...
+
+// 1: Unit (Bottom/False)
+unit (x: A) : A = x
+
+// 2: Never (Bottom/False)
+Never: Type = (A: Type) -> A
+
+// 3: Natural numbers
+Nat: Type := (A -> A) -> A -> A
+zero: Nat := fn (f: A -> A) (x: A) => x
+succ (n: Nat): Nat := fn (n: Nat) (f: A -> A) (x: A) => f (n f x)
+
+add (m: Nat) (n: Nat): Nat := fn (f: A -> A) (x: A) => m f (n f x)
+mul (m: Nat) (n: Nat): Nat := fn (f: A -> A) (x: A) => m (n f) x
+// alternative repeated multiplication
+exp (m: Nat) (n: Nat): Nat := fn (f: A -> A) (x: A) => n m f x
+
+// 4: Booleans (not to be confused with bottom and top)
+let Bool: Type := A -> A -> A
+let true: Bool := fn (t: A) (f: A) => t
+let false: Bool := fn (t: A) (f: A) => f
+
+Pair: Type := (A -> B -> C) -> C
+pair (a: A) (b: B): Pair A B := fn (f: A -> B -> C) => f a b
+
+// These are the projections
+fst (p: Pair A B): A := p A (fn (a: A) (b: B) => a)
+snd (p: Pair A B): B := p B (fn (a: A) (b: B) => b)
+
+Either: Type := (A -> C) -> (B -> C) -> C
+left (a: A): Either A B := fn (f: A -> C) (g: B -> C) => f a
+right (b: B): Either A B := fn (f: A -> C) (g: B -> C) => g b
+match (e: Either A B) (f: A -> C) (g: B -> C): C := e C f g
+
+Eq (x: A) (y: A): Type := (P: A -> Type) (px: P x) => P y
+refl (x: A): Eq A x x := (P: A -> Type) (p: P x) => p
+
+Equiv (f: A -> B) (g: A -> B): Type := f (x: A) => Eq B (f x) (g x)
+// how does proof of Equiv look like
+
+InverseLeft (f: A -> B) (g: B -> A): Type = (x: A) => Eq A (g (f x)) x
+InverseRight (f: A -> B) (g: B -> A): Type =
+    (y: B) => Eq B (f (g y)) y;
+Inverse: (f: A -> B) (g: B -> A): Type =
+    Pair ((x: A) -> Eq A (g (f x)) x) ((y: B) -> Eq B (f (g y)) y)
+
+Int: Type := (x: X) -> (f: X -> X) -> (g: X -> X) (p: Inverse X X f g) -> X
+let int_zero: Int := fn (x: X) (f: X -> X) (g: X -> X) (p: Inverse X X f g) => x
+let int_succ (n: Int): Int := fn (x: X) (f: X -> X) (g: X -> X) (p: Inverse X X f g) => f (n X x f g p)
+let int_pred (n: Int): Int := fn (x: X) (f: X -> X) (g: X -> X) (p: Inverse X X f g) => g (n X x f g p)
+
+// u8 definition (built on Nats)
+two: Nat := succ succ zero
+eight: Nat := succ succ succ succ succ succ succ succ zero
+pow_2_8: Nat := exp two eight
+
+U8: Type := fn (f: A -> A) (x: A) (p: Eq (pow_2_8 A f x)) => A
+u8_zero: U8 := fn (f: A -> A) (x: A) (p: Eq (pow_2_8 A f x) x) => x
+u8_succ (n: U8): U8 := fn (f: A -> A) (x: A) (p: Eq (pow_2_8 A f x) x) => f (n A f x p)

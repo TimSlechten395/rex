@@ -55,6 +55,9 @@ pub enum RealToken {
     Type,
 
     Eq, // "="
+    //
+    Assign,      // ":="
+    Tabs(usize), // number of tabs
 
     // sugar keywords
     Loop,
@@ -101,6 +104,11 @@ impl Display for RealToken {
             RealToken::Type => write!(f, "Type"),
 
             RealToken::Eq => write!(f, "="),
+            RealToken::Assign => write!(f, "="),
+            RealToken::Tabs(usize) => {
+                let tabs = "    ".repeat(*usize);
+                write!(f, "{}", tabs)
+            }
 
             RealToken::Loop => write!(f, "loop"),
             RealToken::While => write!(f, "while"),
@@ -143,6 +151,7 @@ pub fn lexer<'a>()
 
     let arrow = just('-').then_ignore(just('>')).to(RealToken::Arrow);
     let double_arrow = just('=').then_ignore(just('>')).to(RealToken::DoubleArrow);
+    let assign = just(':').then_ignore(just('=')).to(RealToken::Assign);
 
     let number = number_parser().map(RealToken::Number);
 
@@ -189,6 +198,12 @@ pub fn lexer<'a>()
 
     let comment_content = any().and_is(newline().or(end()).not()).repeated().collect();
 
+    let tabs = just('\t')
+        .repeated()
+        .at_least(1)
+        .count()
+        .map(|n| RealToken::Tabs(n));
+
     // Token parser: choice of all tokens, with whitespace trimmed around
     let token = choice((
         arrow,
@@ -199,6 +214,7 @@ pub fn lexer<'a>()
         number,
         ident,
         pipe,
+        tabs,
     ))
     .map_with(|token, e| (Ok(Token::RealToken(token)), e.span()));
 
@@ -232,7 +248,7 @@ pub fn lexer<'a>()
             e.span(),
         )
     });
-    let error = choice((space, newline, comment, invalid));
+    let error = choice((newline, space, comment, invalid));
 
     token.or(error).repeated().collect::<Vec<_>>()
 }

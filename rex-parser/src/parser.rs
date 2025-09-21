@@ -32,11 +32,19 @@ pub enum SugarExpr<T> {
     // Multi-argument Pi Type (sugar for nested single-arg Pi types)
     // Example: `(Pi (x:T y:U) return_type)`
     MultiPi(Vec<(Option<String>, T)>, T),
+    MultiSigma(Vec<T>),
 
     // Let binding sugar: `let name : type = value in body`
+    // or: 'let add (A: Type) (x: A) (y: A) : A = x + y
     LetIn(String, T, T, T),
     // Pipe operator
     Pipe(T, T),
+}
+
+struct Binding<T> {
+    name: Option<String>,
+    ty: Option<SugarExpr<T>>,
+    value: SugarExpr<T>,
 }
 
 impl<T: Clone> SugarExpr<T> {
@@ -63,6 +71,7 @@ impl<T: Clone> SugarExpr<T> {
                     .fold(init, f.clone()),
                 b.clone(),
             ),
+            SugarExpr::MultiSigma(items) => items.clone().into_iter().fold(init, f.clone()),
             SugarExpr::LetIn(_, a, b, c) => f(f(f(init, a.clone()), b.clone()), c.clone()),
             SugarExpr::Pipe(a, b) => f(f(init, a.clone()), b.clone()),
         }
@@ -193,6 +202,23 @@ impl NormalSugarExpr {
                         }
                     }
                     1 => ret_ty.traverse(path),
+                    _ => bail!("invalid path"),
+                },
+                SugarExpr::MultiSigma(items) => match cur {
+                    0 => {
+                        let cur = path
+                            .pop()
+                            .ok_or(anyhow!("pointed to multisigma params without giving param"))?;
+                        if let Some(param) = items.get(cur) {
+                            param.clone().traverse(path)
+                        } else {
+                            bail!(
+                                "pointed to {} arg but sigma has only {} args",
+                                cur,
+                                items.len()
+                            )
+                        }
+                    }
                     _ => bail!("invalid path"),
                 },
                 SugarExpr::LetIn(_, ty, val, body) => match cur {
@@ -364,6 +390,21 @@ impl SpannedResultSugarExpr {
                             })
                         })
                         .or(Some(Vec::new())),
+                    SugarExpr::MultiSigma(items) => items
+                        .into_iter()
+                        .enumerate()
+                        .fold(None, |acc, (i, item)| {
+                            if acc.is_none() {
+                                item.search(token_index).map(|mut x| {
+                                    x.push(i);
+                                    x
+                                })
+                            } else {
+                                acc
+                            }
+                        })
+                        .or(Some(Vec::new())),
+
                     SugarExpr::LetIn(_, a, b, c) => a
                         .search(token_index)
                         .map(|mut x| {
@@ -483,6 +524,17 @@ impl SpannedResultSugarExpr {
                     1 => ret_ty.traverse(path),
                     _ => bail!("invalid path in multipi"),
                 },
+                SugarExpr::MultiSigma(items) => {
+                    if let Some(param) = items.get(cur) {
+                        param.clone().traverse(path)
+                    } else {
+                        bail!(
+                            "pointed to {} arg but pi has only {} args",
+                            cur,
+                            items.len()
+                        )
+                    }
+                }
                 SugarExpr::LetIn(_, ty, val, body) => match cur {
                     0 => ty.traverse(path),
                     1 => val.traverse(path),
@@ -579,7 +631,6 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 ))
             },
         );
-
         let pi_arg = choice((
             var_and_type
                 .clone()
@@ -603,6 +654,30 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                     ret
                 }
             });
+
+        let sigma = pi
+            .clone()
+            .separated_by(just(RealToken::Comma))
+            .at_least(1)
+            .collect::<Vec<SpannedResultSugarExpr>>()
+            .then(just(RealToken::Comma).or_not())
+            .map_with(|(items, comma), e| {
+                let mut items: Vec<_> = items.into_iter().map(|x| Box::new(x)).collect();
+                if items.len() > 1 || comma.is_some() {
+                    SpannedResultSugarExpr((Ok(SugarExpr::MultiSigma(items)), e.span()))
+                } else {
+                    *items.pop().unwrap()
+                }
+            });
+
+        let binding = just(ident)
+            .then(lambda_arg.clone())
+            .repeated()
+            .collect::<Vec<_>>()
+            .then(just(RealToken::Colon).then(expr).or_not())
+            .then(just(RealToken::Eq))
+            .then(expr)
+            .map(Binding);
 
         let recover_let = any()
             .and_is(just(RealToken::SemiColon).or(just(RealToken::Let)).not())
@@ -634,7 +709,7 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 })
                 .or(recover_let),
         );
-        choice((pi, r#let))
+        choice((sigma, r#let))
 
         // let ann = pi.clone().foldl_with(
         //     just(Token::Colon).ignore_then(pi).repeated(),
