@@ -8,7 +8,8 @@ use functor_derive::Functor;
 use std::fmt;
 use thiserror::Error;
 
-use crate::lexer::RealToken;
+use crate::lexer::AbsoluteIndent;
+use crate::lexer::Token;
 
 // Later all idents will become syntactic sugar for indices
 
@@ -18,62 +19,54 @@ use crate::lexer::RealToken;
 #[derive(Debug, Clone, PartialEq, Functor)]
 pub enum SugarExpr<T> {
     Var(String),
-    App(T, T), // Function application
-    Type,      // Type of all types
+    App(Vec<T>), // Function application
+    Type,        // Type of all types
 
-    Ann(T, T),
+    Ann(Vec<T>),
+    Named(Vec<T>),
 
     Group(T),
 
+    // first param is types of module dependencies second is the items in the module
+    // to be converted to product type
+    // pub/priv is done with an extra module that just takes the full module and returns a smaller
+    // module
+    Module(Vec<T>, Vec<T>),
+
     // Multi-argument Lambda (sugar for nested single-arg lambdas)
     // Example: `(lambda (x:T) (y:U) body)`
-    MultiLambda(Vec<(String, Option<T>)>, T),
+    // MultiLambda(Vec<(String, Option<T>)>, T),
+    MultiLambda(Vec<T>),
 
     // Multi-argument Pi Type (sugar for nested single-arg Pi types)
     // Example: `(Pi (x:T y:U) return_type)`
-    MultiPi(Vec<(Option<String>, T)>, T),
+    MultiPi(Vec<T>),
     MultiSigma(Vec<T>),
 
     // Let binding sugar: `let name : type = value in body`
-    // or: 'let add (A: Type) (x: A) (y: A) : A = x + y
-    LetIn(String, T, T, T),
+    // LetIn(String, T, T, T),
     // Pipe operator
-    Pipe(T, T),
-}
-
-struct Binding<T> {
-    name: Option<String>,
-    ty: Option<SugarExpr<T>>,
-    value: SugarExpr<T>,
+    Pipe(Vec<T>),
 }
 
 impl<T: Clone> SugarExpr<T> {
     pub fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
         match &self {
             SugarExpr::Var(_) => init,
-            SugarExpr::App(a, b) => f(f(init, a.clone()), b.clone()),
             SugarExpr::Type => init,
-            SugarExpr::Ann(a, b) => f(f(init, a.clone()), b.clone()),
             SugarExpr::Group(a) => f(init, a.clone()),
-            SugarExpr::MultiLambda(my_small_vec, b) => f(
-                my_small_vec
-                    .clone()
-                    .into_iter()
-                    .filter_map(|x| x.1)
-                    .fold(init, f.clone()),
-                b.clone(),
-            ),
-            SugarExpr::MultiPi(my_small_vec, b) => f(
-                my_small_vec
-                    .clone()
-                    .into_iter()
-                    .map(|x| x.1)
-                    .fold(init, f.clone()),
-                b.clone(),
-            ),
-            SugarExpr::MultiSigma(items) => items.clone().into_iter().fold(init, f.clone()),
-            SugarExpr::LetIn(_, a, b, c) => f(f(f(init, a.clone()), b.clone()), c.clone()),
-            SugarExpr::Pipe(a, b) => f(f(init, a.clone()), b.clone()),
+            SugarExpr::App(items)
+            | SugarExpr::MultiLambda(items)
+            | SugarExpr::MultiPi(items)
+            | SugarExpr::Named(items)
+            | SugarExpr::Ann(items)
+            | SugarExpr::MultiSigma(items)
+            | SugarExpr::Pipe(items) => items.clone().into_iter().fold(init, f.clone()),
+
+            SugarExpr::Module(items1, items2) => items2
+                .clone()
+                .into_iter()
+                .fold(items1.clone().into_iter().fold(init, f.clone()), f.clone()),
         }
     }
 }
@@ -81,7 +74,7 @@ impl<T: Clone> SugarExpr<T> {
 #[derive(Debug, Clone, PartialEq, Functor, Error)]
 pub enum ExprError<T> {
     #[error("Invalid expression: found tokens {0:?}")]
-    InvalidExpr(Vec<RealToken>),
+    InvalidExpr(Vec<Token<AbsoluteIndent>>),
 
     #[error("malformed let binding")]
     FailedLet(T),
@@ -145,21 +138,13 @@ pub struct NormalSugarExpr(pub SugarExpr<Box<NormalSugarExpr>>);
 impl NormalSugarExpr {
     pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
         let current = path.pop();
+        
+        use SugarExpr::*;
         match current {
             Some(cur) => match self.0 {
-                SugarExpr::Var(_) => bail!("invalid path"),
-                SugarExpr::App(f, a) => match cur {
-                    0 => f.traverse(path),
-                    1 => a.traverse(path),
-                    _ => bail!("invalid path"),
-                },
-                SugarExpr::Type => bail!("invalid path"),
-                SugarExpr::Ann(e, a) => match cur {
-                    0 => e.traverse(path),
-                    1 => a.traverse(path),
-                    _ => bail!("invalid path"),
-                },
-                SugarExpr::Group(e) => match cur {
+                Var(_) => bail!("invalid path"),
+                Type => bail!("invalid path"),
+                Group(e) => match cur {
                     0 => e.traverse(path),
                     _ => bail!("invalid path"),
                 },
@@ -204,33 +189,54 @@ impl NormalSugarExpr {
                     1 => ret_ty.traverse(path),
                     _ => bail!("invalid path"),
                 },
-                SugarExpr::MultiSigma(items) => match cur {
-                    0 => {
-                        let cur = path
-                            .pop()
-                            .ok_or(anyhow!("pointed to multisigma params without giving param"))?;
-                        if let Some(param) = items.get(cur) {
-                            param.clone().traverse(path)
-                        } else {
-                            bail!(
-                                "pointed to {} arg but sigma has only {} args",
-                                cur,
-                                items.len()
-                            )
-                        }
+                SugarExpr::MultiSigma(items) |  => {
+                    if let Some(param) = items.get(cur) {
+                        param.clone().traverse(path)
+                    } else {
+                        bail!("invalid path")
                     }
-                    _ => bail!("invalid path"),
-                },
-                SugarExpr::LetIn(_, ty, val, body) => match cur {
-                    0 => ty.traverse(path),
-                    1 => val.traverse(path),
-                    2 => body.traverse(path),
-                    _ => bail!("invalid path"),
-                },
+                }
+                // SugarExpr::LetIn(_, ty, val, body) => match cur {
+                //     0 => ty.traverse(path),
+                //     1 => val.traverse(path),
+                //     2 => body.traverse(path),
+                //     _ => bail!("invalid path"),
+                // },
                 SugarExpr::Pipe(f, a) => match cur {
                     0 => f.traverse(path),
                     1 => a.traverse(path),
                     _ => bail!("invalid path"),
+                },
+                SugarExpr::Module(items1, items2) => match cur {
+                    0 => {
+                        let cur = path
+                            .pop()
+                            .ok_or(anyhow!("pointed to mod deps without giving dep"))?;
+                        if let Some(param) = items1.get(cur) {
+                            param.clone().traverse(path)
+                        } else {
+                            bail!(
+                                "pointed to mod dep {} but mod has only {} deps",
+                                cur,
+                                items1.len()
+                            )
+                        }
+                    }
+                    1 => {
+                        let cur = path
+                            .pop()
+                            .ok_or(anyhow!("pointed to mod items without giving item"))?;
+                        if let Some(param) = items2.get(cur) {
+                            param.clone().traverse(path)
+                        } else {
+                            bail!(
+                                "pointed to mod item {} but mod has only {} items",
+                                cur,
+                                items2.len()
+                            )
+                        }
+                    }
+                    _ => bail!("invalid path in mod"),
                 },
             },
 
@@ -546,6 +552,37 @@ impl SpannedResultSugarExpr {
                     1 => a.traverse(path),
                     _ => bail!("invalid path in pipe"),
                 },
+                SugarExpr::Module(items1, items2) => match cur {
+                    0 => {
+                        let cur = path
+                            .pop()
+                            .ok_or(anyhow!("pointed to mod deps without giving dep"))?;
+                        if let Some(param) = items1.get(cur) {
+                            param.clone().traverse(path)
+                        } else {
+                            bail!(
+                                "pointed to mod dep {} but mod has only {} deps",
+                                cur,
+                                items1.len()
+                            )
+                        }
+                    }
+                    1 => {
+                        let cur = path
+                            .pop()
+                            .ok_or(anyhow!("pointed to mod items without giving item"))?;
+                        if let Some(param) = items2.get(cur) {
+                            param.clone().traverse(path)
+                        } else {
+                            bail!(
+                                "pointed to mod item {} but mod has only {} items",
+                                cur,
+                                items2.len()
+                            )
+                        }
+                    }
+                    _ => bail!("invalid path in mod"),
+                },
             },
 
             None => Ok(self),
@@ -573,43 +610,43 @@ pub type Span = SimpleSpan;
 // TODO: Use recursion schemes
 pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
-    &'tokens [RealToken],
+    &'tokens [Token<AbsoluteIndent>],
     SpannedResultSugarExpr,
-    extra::Err<Rich<'tokens, RealToken>>,
+    extra::Err<Rich<'tokens, Token<AbsoluteIndent>>>,
 > + Clone {
     recursive(|expr| {
         // `expr` represents the *entire* expression grammar
         // --- 1. Basic Tokens ---
-        let r#type = just(RealToken::Type).to(SugarExpr::Type);
+        let r#type = just(Token::Type).to(SugarExpr::Type);
         // same as base
 
         let ident = select! {
-        RealToken::Ident(name) => name
+        Token::Ident(name) => name
         };
 
         let paren_expr = expr
             .clone()
-            .delimited_by(just(RealToken::LParen), just(RealToken::RParen))
+            .delimited_by(just(Token::LParen), just(Token::RParen))
             .map(|x| SugarExpr::Group(Box::new(x)));
 
         let var_and_type = ident
             .clone()
-            .then_ignore(just(RealToken::Colon))
+            .then_ignore(just(Token::Colon))
             .then(expr.clone());
 
         // type annotation is optional
         let lambda_arg = choice((
             var_and_type
                 .clone()
-                .delimited_by(just(RealToken::LParen), just(RealToken::RParen))
+                .delimited_by(just(Token::LParen), just(Token::RParen))
                 .map(|(name, ty)| (name, Some(Box::new(ty)))),
             ident.clone().map(|name| (name, None)),
         ));
 
         // fn (x: y) (b: y) => body)
-        let lambda = just(RealToken::Fn)
+        let lambda = just(Token::Fn)
             .ignore_then(lambda_arg.repeated().at_least(1).collect::<Vec<_>>())
-            .then_ignore(just(RealToken::DoubleArrow))
+            .then_ignore(just(Token::DoubleArrow))
             .then(expr.clone()) // Body (can be any expr)
             .map(|(params, body)| SugarExpr::MultiLambda(params, Box::new(body)));
 
@@ -623,7 +660,7 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
         });
 
         let pipe = app.clone().foldl_with(
-            just(RealToken::Pipe).ignore_then(app).repeated(),
+            just(Token::Pipe).ignore_then(app).repeated(),
             |acc, arg, e| {
                 SpannedResultSugarExpr((
                     Ok(SugarExpr::Pipe(Box::new(acc), Box::new(arg))),
@@ -634,13 +671,13 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
         let pi_arg = choice((
             var_and_type
                 .clone()
-                .delimited_by(just(RealToken::LParen), just(RealToken::RParen))
+                .delimited_by(just(Token::LParen), just(Token::RParen))
                 .map(|(name, ty)| (Some(name), Box::new(ty))),
             pipe.clone().map(|ty| (None, Box::new(ty))),
         ));
 
         let pi = pi_arg
-            .then_ignore(just(RealToken::Arrow))
+            .then_ignore(just(Token::Arrow))
             .repeated()
             .collect::<Vec<(Option<String>, Box<SpannedResultSugarExpr>)>>()
             .then(pipe.clone())
@@ -657,10 +694,10 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
         let sigma = pi
             .clone()
-            .separated_by(just(RealToken::Comma))
+            .separated_by(just(Token::Comma))
             .at_least(1)
             .collect::<Vec<SpannedResultSugarExpr>>()
-            .then(just(RealToken::Comma).or_not())
+            .then(just(Token::Comma).or_not())
             .map_with(|(items, comma), e| {
                 let mut items: Vec<_> = items.into_iter().map(|x| Box::new(x)).collect();
                 if items.len() > 1 || comma.is_some() {
@@ -670,31 +707,22 @@ pub fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 }
             });
 
-        let binding = just(ident)
-            .then(lambda_arg.clone())
-            .repeated()
-            .collect::<Vec<_>>()
-            .then(just(RealToken::Colon).then(expr).or_not())
-            .then(just(RealToken::Eq))
-            .then(expr)
-            .map(Binding);
-
         let recover_let = any()
-            .and_is(just(RealToken::SemiColon).or(just(RealToken::Let)).not())
+            .and_is(just(Token::SemiColon).or(just(Token::Let)).not())
             .repeated()
-            .ignore_then(just(RealToken::SemiColon))
+            .ignore_then(just(Token::SemiColon))
             .ignore_then(expr.clone())
             .map(|expr| Err(ExprError::FailedLet(Box::new(expr))))
             .map_with(|expr, e| SpannedResultSugarExpr((expr, e.span())));
 
         // TODO: If we make let an atom the parser seems to blow up. Figure out why this is the
         // case
-        let r#let = just(RealToken::Let).ignore_then(
+        let r#let = just(Token::Let).ignore_then(
             var_and_type
                 .clone()
-                .then_ignore(just(RealToken::Eq))
+                .then_ignore(just(Token::Eq))
                 .then(expr.clone())
-                .then_ignore(just(RealToken::SemiColon))
+                .then_ignore(just(Token::SemiColon))
                 .then(expr.clone())
                 .map_with(|(((var, ty), expr1), expr2), e| {
                     SpannedResultSugarExpr((

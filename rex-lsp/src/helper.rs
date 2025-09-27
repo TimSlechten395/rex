@@ -1,4 +1,4 @@
-use rex::{Token, lexer::Spanned};
+use rex::{lexer::Spanned, lexer::Token};
 use tower_lsp_server::lsp_types::{Position, Range};
 
 pub fn char_to_pos(text: &ropey::Rope, char: usize) -> (usize, usize) {

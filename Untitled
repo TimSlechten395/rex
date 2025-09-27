@@ -1,0 +1,184 @@
+Oct 07 11:19:53 my-computer kernel: 
+Oct 07 11:19:54 my-computer kernel: nvidia-gpu 0000:26:00.3: i2c timeout error e0000000
+Oct 07 11:19:54 my-computer kernel: ucsi_ccg 5-0008: i2c_transfer failed -110
+Oct 07 11:19:54 my-computer kernel: ucsi_ccg 5-0008: ucsi_ccg_init failed - -110
+Oct 07 11:19:54 my-computer kernel: ucsi_ccg 5-0008: probe with driver ucsi_ccg failed with error -110
+Oct 07 11:19:54 my-computer dbus-broker-launch[702]: Ignoring duplicate name 'org.freedesktop.FileManager1' in service file '/usr/share//dbus-1/services/org.kde.dolphin.FileManager1.service'
+░░ Subject: Invalid service file
+░░ Defined-By: dbus-broker
+░░ Support: https://groups.google.com/forum/#!forum/bus1-devel
+░░ 
+░░ A service file is a ini-type configuration file.
+░░ 
+░░ It has one required section
+░░ named [D-BUS Service]. The section contains the required key 'Name', which
+░░ must be a valid D-Bus name that is unique across all service files. It also
+░░ contains at least one of the two optional keys 'SystemdService' and 'Exec',
+░░ as well as optionally the key 'User'. Exec must be a valid shell command and
+░░ User must be a valid user on the system.
+░░ 
+░░ A service file should be named after the D-Bus name it configures. That is
+░░ a file containing Name=org.foo.bar1 should be named org.foo.bar1.service.
+░░ For backwards compatibility, we only warn when files do not follow this
+░░ convention when run as a user bus. The system bus considers this an error
+░░ and ignores the service file.
+Oct 07 11:59:26 my-computer kernel: [drm:__nv_drm_semsurf_wait_fence_work_cb [nvidia_drm]] *ERROR* [nvidia-drm] [GPU ID 0x00002600] Failed to register auto-value-update on pre-wait value for sync FD semaphore surface
+Oct 07 11:59:27 my-computer systemd-coredump[14232]: Process 746 (Hyprland) of user 1000 dumped core.
+                                                     
+                                                     Stack trace of thread 746:
+                                                     #0  0x00007f0e668255df abort (libc.so.6 + 0x255df)
+                                                     #1  0x00005617104004be n/a (/usr/bin/Hyprland + 0x2464be)
+                                                     #2  0x00007f0e6683e540 n/a (libc.so.6 + 0x3e540)
+                                                     #3  0x00007f0e6689894c n/a (libc.so.6 + 0x9894c)
+                                                     #4  0x00007f0e6683e410 raise (libc.so.6 + 0x3e410)
+                                                     #5  0x000056171085a63e _ZN15CHyprOpenGLImpl5beginEN9Hyprutils6Memory14CSharedPointerI8CMonitorEERKNS0_4Math7CRegionEP12CFramebufferSt8optionalIS6_E (/usr/bin/Hyprland + 0x6a063e)
+                                                     #6  0x00005617108899e5 _ZN13CHyprRenderer11beginRenderEN9Hyprutils6Memory14CSharedPointerI8CMonitorEERNS0_4Math7CRegionE11eRenderModeNS2_I9IHLBufferEEP12CFramebufferb (/usr/bin/Hyprland + 0x6cf9e5)
+                                                     #7  0x000056171088afc5 _ZN13CHyprRenderer13renderMonitorEN9Hyprutils6Memory14CSharedPointerI8CMonitorEEb (/usr/bin/Hyprland + 0x6d0fc5)
+                                                     #8  0x000056171056755d _ZN22CMonitorFrameScheduler7onFrameEv (/usr/bin/Hyprland + 0x3ad55d)
+                                                     #9  0x00007f0e6767cf0d _ZN9Hyprutils6Signal15CSignalListener12emitInternalEPv (libhyprutils.so.7 + 0x27f0d)
+                                                     #10 0x00007f0e6767d195 _ZN9Hyprutils6Signal11CSignalBase12emitInternalEPv (libhyprutils.so.7 + 0x28195)
+                                                     #11 0x00007f0e67747142 _ZN10Aquamarine8CBackend12dispatchIdleEv (libaquamarine.so.8 + 0x77142)
+                                                     #12 0x000056171062a63a n/a (/usr/bin/Hyprland + 0x47063a)
+                                                     #13 0x00007f0e67557182 wl_event_loop_dispatch (libwayland-server.so.0 + 0xa182)
+                                                     #14 0x00007f0e67559297 wl_display_run (libwayland-server.so.0 + 0xc297)
+                                                     #15 0x0000561710630de9 _ZN17CEventLoopManager9enterLoopEv (/usr/bin/Hyprland + 0x476de9)
+                                                     #16 0x000056171039ca6b main (/usr/bin/Hyprland + 0x1e2a6b)
+                                                     #17 0x00007f0e66827675 n/a (libc.so.6 + 0x27675)
+                                                     #18 0x00007f0e66827729 __libc_start_main (libc.so.6 + 0x27729)
+                                                     #19 0x00005617103fb555 _start (/usr/bin/Hyprland + 0x241555)
+                                                     
+                                                     Stack trace of thread 774:
+                                                     #0  0x00007f0e6691876d syscall (libc.so.6 + 0x11876d)
+                                                     #1  0x00007f0e667377ee g_cond_wait (libglib-2.0.so.0 + 0x8f7ee)
+                                                     #2  0x00007f0e666ce1cd n/a (libglib-2.0.so.0 + 0x261cd)
+                                                     #3  0x00007f0e66740447 n/a (libglib-2.0.so.0 + 0x98447)
+                                                     #4  0x00007f0e6673f87c n/a (libglib-2.0.so.0 + 0x9787c)
+                                                     #5  0x00007f0e668969cb n/a (libc.so.6 + 0x969cb)
+                                                     #6  0x00007f0e6691aa0c n/a (libc.so.6 + 0x11aa0c)
+                                                     
+                                                     Stack trace of thread 773:
+                                                     #0  0x00007f0e6691876d syscall (libc.so.6 + 0x11876d)
+                                                     #1  0x00007f0e667377ee g_cond_wait (libglib-2.0.so.0 + 0x8f7ee)
+                                                     #2  0x00007f0e666ce1cd n/a (libglib-2.0.so.0 + 0x261cd)
+                                                     #3  0x00007f0e666ce23d g_async_queue_pop (libglib-2.0.so.0 + 0x2623d)
+                                                     #4  0x00007f0e6606051c n/a (libpangoft2-1.0.so.0 + 0xc51c)
+                                                     #5  0x00007f0e6673f87c n/a (libglib-2.0.so.0 + 0x9787c)
+                                                     #6  0x00007f0e668969cb n/a (libc.so.6 + 0x969cb)
+                                                     #7  0x00007f0e6691aa0c n/a (libc.so.6 + 0x11aa0c)
+                                                     
+                                                     Stack trace of thread 776:
+                                                     #0  0x00007f0e6689f042 n/a (libc.so.6 + 0x9f042)
+                                                     #1  0x00007f0e668931ac n/a (libc.so.6 + 0x931ac)
+                                                     #2  0x00007f0e668931f4 n/a (libc.so.6 + 0x931f4)
+                                                     #3  0x00007f0e6690da36 ppoll (libc.so.6 + 0x10da36)
+                                                     #4  0x00007f0e66708744 n/a (libglib-2.0.so.0 + 0x60744)
+                                                     #5  0x00007f0e66708825 g_main_context_iteration (libglib-2.0.so.0 + 0x60825)
+                                                     #6  0x00007f0e5889d7be n/a (libdconfsettings.so + 0x77be)
+                                                     #7  0x00007f0e6673f87c n/a (libglib-2.0.so.0 + 0x9787c)
+                                                     #8  0x00007f0e668969cb n/a (libc.so.6 + 0x969cb)
+                                                     #9  0x00007f0e6691aa0c n/a (libc.so.6 + 0x11aa0c)
+                                                     
+                                                     Stack trace of thread 775:
+                                                     #0  0x00007f0e6689f042 n/a (libc.so.6 + 0x9f042)
+                                                     #1  0x00007f0e668931ac n/a (libc.so.6 + 0x931ac)
+                                                     #2  0x00007f0e668931f4 n/a (libc.so.6 + 0x931f4)
+                                                     #3  0x00007f0e6690da36 ppoll (libc.so.6 + 0x10da36)
+                                                     #4  0x00007f0e66708744 n/a (libglib-2.0.so.0 + 0x60744)
+                                                     #5  0x00007f0e66708825 g_main_context_iteration (libglib-2.0.so.0 + 0x60825)
+                                                     #6  0x00007f0e66708872 n/a (libglib-2.0.so.0 + 0x60872)
+                                                     #7  0x00007f0e6673f87c n/a (libglib-2.0.so.0 + 0x9787c)
+                                                     #8  0x00007f0e668969cb n/a (libc.so.6 + 0x969cb)
+                                                     #9  0x00007f0e6691aa0c n/a (libc.so.6 + 0x11aa0c)
+                                                     
+                                                     Stack trace of thread 777:
+                                                     #0  0x00007f0e6689f042 n/a (libc.so.6 + 0x9f042)
+                                                     #1  0x00007f0e668931ac n/a (libc.so.6 + 0x931ac)
+                                                     #2  0x00007f0e668931f4 n/a (libc.so.6 + 0x931f4)
+                                                     #3  0x00007f0e6690da36 ppoll (libc.so.6 + 0x10da36)
+                                                     #4  0x00007f0e66708744 n/a (libglib-2.0.so.0 + 0x60744)
+                                                     #5  0x00007f0e667089d7 g_main_loop_run (libglib-2.0.so.0 + 0x609d7)
+                                                     #6  0x00007f0e6719c264 n/a (libgio-2.0.so.0 + 0x11a264)
+                                                     #7  0x00007f0e6673f87c n/a (libglib-2.0.so.0 + 0x9787c)
+                                                     #8  0x00007f0e668969cb n/a (libc.so.6 + 0x969cb)
+                                                     #9  0x00007f0e6691aa0c n/a (libc.so.6 + 0x11aa0c)
+                                                     ELF object binary architecture: AMD x86-64
+░░ Subject: Process 746 (Hyprland) dumped core
+░░ Defined-By: systemd
+░░ Support: https://lists.freedesktop.org/mailman/listinfo/systemd-devel
+░░ Documentation: man:core(5)
+░░ 
+░░ Process 746 (Hyprland) crashed and dumped core.
+░░ 
+░░ This usually indicates a programming error in the crashing program and
+░░ should be reported to its vendor as a bug.
+Oct 07 11:59:27 my-computer systemd-coredump[14255]: Process 1010 (xdg-desktop-por) of user 1000 dumped core.
+                                                     
+                                                     Stack trace of thread 1010:
+                                                     #0  0x00007f317fc6fc01 n/a (libwayland-client.so.0 + 0x5c01)
+                                                     #1  0x00007f317fc6fd81 n/a (libwayland-client.so.0 + 0x5d81)
+                                                     #2  0x00007f317fc702e7 wl_proxy_marshal_array_flags (libwayland-client.so.0 + 0x62e7)
+                                                     #3  0x00007f317fc70fd3 wl_proxy_marshal_flags (libwayland-client.so.0 + 0x6fd3)
+                                                     #4  0x0000558016176008 n/a (/usr/lib/xdg-desktop-portal-hyprland + 0x26008)
+                                                     #5  0x0000558016181de1 n/a (/usr/lib/xdg-desktop-portal-hyprland + 0x31de1)
+                                                     #6  0x00005580161823bd n/a (/usr/lib/xdg-desktop-portal-hyprland + 0x323bd)
+                                                     #7  0x00007f317f440cb1 n/a (libc.so.6 + 0x40cb1)
+                                                     #8  0x00007f317f440d8e exit (libc.so.6 + 0x40d8e)
+                                                     #9  0x00007f317f42767c n/a (libc.so.6 + 0x2767c)
+                                                     #10 0x00007f317f427729 __libc_start_main (libc.so.6 + 0x27729)
+                                                     #11 0x00005580161680d5 n/a (/usr/lib/xdg-desktop-portal-hyprland + 0x180d5)
+                                                     ELF object binary architecture: AMD x86-64
+░░ Subject: Process 1010 (xdg-desktop-por) dumped core
+░░ Defined-By: systemd
+░░ Support: https://lists.freedesktop.org/mailman/listinfo/systemd-devel
+░░ Documentation: man:core(5)
+░░ 
+░░ Process 1010 (xdg-desktop-por) crashed and dumped core.
+░░ 
+░░ This usually indicates a programming error in the crashing program and
+░░ should be reported to its vendor as a bug.
+Oct 07 11:59:27 my-computer systemd-coredump[14257]: Process 816 (Xwayland) of user 1000 dumped core.
+                                                     
+                                                     Stack trace of thread 816:
+                                                     #0  0x00007f57908255df abort (libc.so.6 + 0x255df)
+                                                     #1  0x00005569f762886f n/a (/usr/bin/Xwayland + 0x18786f)
+                                                     #2  0x00005569f7630e6f n/a (/usr/bin/Xwayland + 0x18fe6f)
+                                                     #3  0x00005569f76262e4 n/a (/usr/bin/Xwayland + 0x1852e4)
+                                                     #4  0x00007f579083e540 n/a (libc.so.6 + 0x3e540)
+                                                     #5  0x00007f579089894c n/a (libc.so.6 + 0x9894c)
+                                                     #6  0x00007f579083e410 raise (libc.so.6 + 0x3e410)
+                                                     #7  0x00007f579082557a abort (libc.so.6 + 0x2557a)
+                                                     #8  0x00007f578747f802 n/a (libnvidia-eglcore.so.580.82.09 + 0x27f802)
+                                                     #9  0x00007f5787d2c40f n/a (libnvidia-eglcore.so.580.82.09 + 0xb2c40f)
+                                                     #10 0x00007f5787d2c9a9 n/a (libnvidia-eglcore.so.580.82.09 + 0xb2c9a9)
+                                                     #11 0x00007f5787c86762 n/a (libnvidia-eglcore.so.580.82.09 + 0xa86762)
+                                                     #12 0x00007f5787c87370 n/a (libnvidia-eglcore.so.580.82.09 + 0xa87370)
+                                                     #13 0x00007f5787c908c5 n/a (libnvidia-eglcore.so.580.82.09 + 0xa908c5)
+                                                     #14 0x00007f5787c90c7b n/a (libnvidia-eglcore.so.580.82.09 + 0xa90c7b)
+                                                     #15 0x00007f5787c77fd0 n/a (libnvidia-eglcore.so.580.82.09 + 0xa77fd0)
+                                                     #16 0x00007f5787c5365b n/a (libnvidia-eglcore.so.580.82.09 + 0xa5365b)
+                                                     #17 0x00007f5787c5619d n/a (libnvidia-eglcore.so.580.82.09 + 0xa5619d)
+                                                     #18 0x00007f5787c10e20 n/a (libnvidia-eglcore.so.580.82.09 + 0xa10e20)
+                                                     #19 0x00007f5787c121f1 n/a (libnvidia-eglcore.so.580.82.09 + 0xa121f1)
+                                                     #20 0x00007f5787c2a6a7 n/a (libnvidia-eglcore.so.580.82.09 + 0xa2a6a7)
+                                                     #21 0x00007f5789567df8 n/a (libEGL_nvidia.so.0 + 0xaadf8)
+                                                     #22 0x00007f57895665c8 n/a (libEGL_nvidia.so.0 + 0xa95c8)
+                                                     #23 0x00007f5790840cb1 n/a (libc.so.6 + 0x40cb1)
+                                                     #24 0x00007f5790840d8e exit (libc.so.6 + 0x40d8e)
+                                                     #25 0x00005569f74ca670 n/a (/usr/bin/Xwayland + 0x29670)
+                                                     #26 0x00005569f74ca6e2 n/a (/usr/bin/Xwayland + 0x296e2)
+                                                     #27 0x00005569f7627e22 n/a (/usr/bin/Xwayland + 0x186e22)
+                                                     #28 0x00005569f754683f n/a (/usr/bin/Xwayland + 0xa583f)
+                                                     #29 0x00005569f74be65d n/a (/usr/bin/Xwayland + 0x1d65d)
+                                                     #30 0x00007f5790827675 n/a (libc.so.6 + 0x27675)
+                                                     #31 0x00007f5790827729 __libc_start_main (libc.so.6 + 0x27729)
+                                                     #32 0x00005569f74c02c5 n/a (/usr/bin/Xwayland + 0x1f2c5)
+                                                     ELF object binary architecture: AMD x86-64
+░░ Subject: Process 816 (Xwayland) dumped core
+░░ Defined-By: systemd
+░░ Support: https://lists.freedesktop.org/mailman/listinfo/systemd-devel
+░░ Documentation: man:core(5)
+░░ 
+░░ Process 816 (Xwayland) crashed and dumped core.
+░░ 
+░░ This usually indicates a programming error in the crashing program and
+░░ should be reported to its vendor as a bug.

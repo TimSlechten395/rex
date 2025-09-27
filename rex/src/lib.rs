@@ -1,8 +1,5 @@
-pub use lexer::*;
-pub use rex_parser::lexer;
-
-pub use parser::*;
-pub use rex_parser::parser;
+pub use rex_parser;
+pub use rex_parser::*;
 
 pub use rex_core;
 pub use rex_core::*;

@@ -35,9 +35,21 @@ impl<T, A, B> Expr<T, A, B> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExprTree<A, B>(pub Expr<Box<ExprTree<A, B>>, A, B>);
+pub struct FixExpr<A, B>(pub Expr<Box<FixExpr<A, B>>, A, B>);
 
-impl<A, B> ExprTree<A, B> {
+pub type CoreFixExpr = FixExpr<usize, ()>;
+
+pub type NamedFixExpr = FixExpr<String, String>;
+
+pub trait DesugarWithNames {
+    fn desugar_with_names(&self) -> NamedFixExpr;
+}
+
+pub trait Desugar {
+    fn desugar(&self) -> CoreFixExpr;
+}
+
+impl<A, B> FixExpr<A, B> {
     pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
         let current = path.pop();
         match current {
@@ -111,38 +123,38 @@ impl<A, B> SpannedExprTree<A, B> {
         }
     }
 
-    pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
-        //         let range = self.0.1.into_range();
-        //         if range.contains(&token_index) {
-        //             match self.0.0.clone() {
-        //                 Ok(node) => match node {
-        //                     SugarExpr::App(a, b) => a
-        //                         .search(token_index)
-        //                         .map(|mut x| {
-        //                             x.push(0);
-        //                             x
-        //                         })
-        //                         .or_else(|| {
-        //                             b.search(token_index).map(|mut x| {
-        //                                 x.push(1);
-        //                                 x
-        //                             })
-        //                         })
-        //                         .or(Some(Vec::new())),
-        //                     SugarExpr::Ann(a, b) => a
-        //                         .search(token_index)
-        //                         .map(|mut x| {
-    }
+    // pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
+    //         let range = self.0.1.into_range();
+    //         if range.contains(&token_index) {
+    //             match self.0.0.clone() {
+    //                 Ok(node) => match node {
+    //                     SugarExpr::App(a, b) => a
+    //                         .search(token_index)
+    //                         .map(|mut x| {
+    //                             x.push(0);
+    //                             x
+    //                         })
+    //                         .or_else(|| {
+    //                             b.search(token_index).map(|mut x| {
+    //                                 x.push(1);
+    //                                 x
+    //                             })
+    //                         })
+    //                         .or(Some(Vec::new())),
+    //                     SugarExpr::Ann(a, b) => a
+    //                         .search(token_index)
+    //                         .map(|mut x| {
+    // }
 
-    pub fn remove_span(self) -> ExprTree<A, B> {
+    pub fn remove_span(self) -> FixExpr<A, B> {
         let expr = self.0.0.fmap(|e| Box::new(e.remove_span()));
-        ExprTree(expr)
+        FixExpr(expr)
     }
 }
 
 pub type Spanned<T> = (T, Vec<usize>);
 
-impl<A: Display, B: Display> Display for ExprTree<A, B> {
+impl<A: Display, B: Display> Display for FixExpr<A, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             Expr::Var { idx: var_id } => write!(f, "{}", var_id),
