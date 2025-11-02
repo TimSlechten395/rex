@@ -1,18 +1,12 @@
-use std::fmt::Display;
+use core::fmt;
+use std::fmt::{Display, Formatter};
 
 use anyhow::bail;
 use functor_derive::Functor;
+use thiserror::Error;
 
-// T should be a wrapper around Expr like F<Expr>
-// this is incredibly important for a streaming parser
-// instead of going text -> tokens -> sugar_ast -> hash cons
-// and building the full structure at each step we can also choose to stream instead. This
-// massively improve memory usage and cache locality
-// Var is stored as Debruijn indices.
-// TODO: allow names in Lambda and Pi variants. We could make it generic over B which represent
-// binding type but in a lot of variants this will just be ()
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
-pub enum Expr<T, A, B> {
+pub enum ExprF<T, A, B> {
     Var { idx: A },
     App { func: T, arg: T },
     Lambda { name: B, param_ty: T, body: T },
@@ -20,68 +14,130 @@ pub enum Expr<T, A, B> {
     Type,
 }
 
-impl<T, A, B> Expr<T, A, B> {
-    pub fn fold<U>(expr: Expr<T, A, B>, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
+// TODO: remove parens based on prec and assoc
+impl Display for NamedExpr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            ExprF::Var { idx } => write!(f, "{idx}"),
+            ExprF::Type => write!(f, "Type"),
+
+            ExprF::App { func, arg } => write!(f, "({} {})", func, arg),
+
+            ExprF::Lambda {
+                name,
+                param_ty,
+                body,
+            } => match name {
+                VarKind::Named(s) => {
+                    write!(f, "(({}: {}) => {})", s, param_ty, body)
+                }
+                VarKind::Idx(_) => {
+                    write!(f, "({} => {})", param_ty, body)
+                }
+            },
+
+            ExprF::Pi {
+                name,
+                param_ty,
+                ret_ty,
+            } => match name {
+                VarKind::Named(s) => {
+                    write!(f, "(({}: {}) -> {})", s, param_ty, ret_ty)
+                }
+                VarKind::Idx(_) => {
+                    write!(f, "({} -> {})", param_ty, ret_ty)
+                }
+            },
+        }
+    }
+}
+
+impl<T, A, B> ExprF<T, A, B> {
+    pub fn fold<U>(expr: ExprF<T, A, B>, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
         match expr {
-            Expr::Var { .. } => init,
-            Expr::App { func, arg } => f(f(init, func), arg),
-            Expr::Lambda { param_ty, body, .. } => f(f(init, param_ty), body),
-            Expr::Pi {
+            ExprF::Var { .. } => init,
+            ExprF::App { func, arg } => f(f(init, func), arg),
+            ExprF::Lambda { param_ty, body, .. } => f(f(init, param_ty), body),
+            ExprF::Pi {
                 param_ty, ret_ty, ..
             } => f(f(init, param_ty), ret_ty),
-            Expr::Type => init,
+            ExprF::Type => init,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FixExpr<A, B>(pub Expr<Box<FixExpr<A, B>>, A, B>);
+pub struct GExpr<A, B>(pub ExprF<Box<GExpr<A, B>>, A, B>);
 
-pub type CoreFixExpr = FixExpr<usize, ()>;
+pub type Expr = GExpr<usize, ()>;
 
-pub type NamedFixExpr = FixExpr<String, String>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VarKind<A, B> {
+    Named(A),
+    Idx(B),
+}
+
+impl Display for VarKind<String, ()> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            VarKind::Named(name) => write!(f, "{name}"),
+            VarKind::Idx(_) => write!(f, "$"),
+        }
+    }
+}
+
+impl Display for VarKind<String, usize> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            VarKind::Named(name) => write!(f, "{name}"),
+            VarKind::Idx(idx) => write!(f, "${idx}"),
+        }
+    }
+}
+
+pub type NamedExpr = GExpr<VarKind<String, usize>, VarKind<String, ()>>;
 
 pub trait DesugarWithNames {
-    fn desugar_with_names(&self) -> NamedFixExpr;
+    fn desugar_with_names(&self) -> NamedExpr;
 }
 
 pub trait Desugar {
-    fn desugar(&self) -> CoreFixExpr;
+    fn desugar(&self) -> Expr;
 }
 
-impl<A, B> FixExpr<A, B> {
+impl<A, B> GExpr<A, B> {
     pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
         let current = path.pop();
         match current {
             Some(cur) => match self.0 {
-                Expr::Var { .. } => {
+                ExprF::Var { .. } => {
                     bail!("invalid path")
                 }
-                Expr::App { func, arg } => match cur {
+                ExprF::App { func, arg } => match cur {
                     0 => func.traverse(path),
                     1 => arg.traverse(path),
                     _ => bail!("invalid path"),
                 },
-                Expr::Lambda { param_ty, body, .. } => match cur {
+                ExprF::Lambda { param_ty, body, .. } => match cur {
                     0 => param_ty.traverse(path),
                     1 => body.traverse(path),
                     _ => bail!("invalid path"),
                 },
-                Expr::Pi {
+                ExprF::Pi {
                     param_ty, ret_ty, ..
                 } => match cur {
                     0 => param_ty.traverse(path),
                     1 => ret_ty.traverse(path),
                     _ => bail!("invalid path"),
                 },
-                Expr::Type => bail!("invalid path"),
+                ExprF::Type => bail!("invalid path"),
             },
 
             None => Ok(self),
         }
     }
 
-    pub fn cata<R>(self, alg: impl Fn(Expr<R, A, B>) -> R + Clone) -> R {
+    pub fn cata<R>(self, alg: impl Fn(ExprF<R, A, B>) -> R + Clone) -> R {
         let term = self.0;
         let mapped = term.fmap(|subterm| subterm.cata(alg.clone()));
         alg(mapped)
@@ -89,40 +145,93 @@ impl<A, B> FixExpr<A, B> {
 }
 
 #[derive(Debug, Clone)]
-pub struct SpannedExprTree<A, B>(pub Spanned<Expr<Box<SpannedExprTree<A, B>>, A, B>>);
+pub struct SpannedExpr<A, B>(pub Spanned<ExprF<Box<SpannedExpr<A, B>>, A, B>, Vec<usize>>);
 
-impl<A, B> SpannedExprTree<A, B> {
-    pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
-        let current = path.pop();
+pub fn remove_span_expr(expr: SpannedNamedExpr) -> NamedExpr {
+    let inner = expr.0.0.fmap(|inner| Box::new(remove_span_expr(*inner)));
+    GExpr(inner)
+}
+
+#[derive(Debug, Clone, Functor, Error)]
+pub enum ExprError<T, S> {
+    #[error("missing binder: {0:?}")]
+    MissingBinder(T, S),
+
+    #[error("missing value: {0:?}")]
+    MissingValue(T, S),
+
+    #[error("missing type: {0:?}")]
+    MissingType(T, S),
+
+    #[error("invalid binder: {0:?}")]
+    InvalidBinder(T, S),
+
+    #[error("invalid binder name: {0:?}")]
+    InvalidBinderName(T, S),
+
+    #[error("invalid binder param: {0:?}")]
+    InvalidBinderParam(T, S),
+}
+
+pub type SpannedNamedExpr = SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>;
+
+pub trait Traverse {
+    type Span;
+    fn traverse(self, span: Self::Span) -> anyhow::Result<Box<Self>>;
+}
+
+pub type Spanned<T, S> = (T, S);
+
+pub trait CompileError<S> {
+    fn span(&self) -> S;
+}
+
+// here we get the wrong error
+pub trait Compile {
+    type Output;
+    type Error;
+    type Span;
+
+    fn run(self) -> Result<Spanned<Self::Output, Self::Span>, Self::Error>;
+}
+
+// impl<A, B> Compile for SpannedExpr<A, B>
+
+impl<A, B> Traverse for SpannedExpr<A, B> {
+    type Span = Box<dyn Iterator<Item = usize>>;
+    fn traverse(self, mut span: Self::Span) -> anyhow::Result<Box<Self>> {
+        let current = span.next();
         match current {
             Some(cur) => match self.0.0 {
-                Expr::Var { .. } => {
+                ExprF::Var { .. } => {
                     bail!("reached var: no more nested expr")
                 }
-                Expr::App { func, arg } => match cur {
-                    0 => func.traverse(path),
-                    1 => arg.traverse(path),
+                ExprF::App { func, arg } => match cur {
+                    0 => func.traverse(span),
+                    1 => arg.traverse(span),
                     _ => bail!("reached app: index {cur} is invalid "),
                 },
-                Expr::Lambda { param_ty, body, .. } => match cur {
-                    0 => param_ty.traverse(path),
-                    1 => body.traverse(path),
+                ExprF::Lambda { param_ty, body, .. } => match cur {
+                    0 => param_ty.traverse(span),
+                    1 => body.traverse(span),
                     _ => bail!("reached lam: index {cur} is invalid "),
                 },
-                Expr::Pi {
+                ExprF::Pi {
                     param_ty, ret_ty, ..
                 } => match cur {
-                    0 => param_ty.traverse(path),
-                    1 => ret_ty.traverse(path),
+                    0 => param_ty.traverse(span),
+                    1 => ret_ty.traverse(span),
                     _ => bail!("reached pi: index {cur} is invalid"),
                 },
-                Expr::Type => bail!("reached: type: no more nested expr"),
+                ExprF::Type => bail!("reached type: no more nested expr"),
             },
 
-            None => Ok(self),
+            None => Ok(Box::new(self)),
         }
     }
+}
 
+impl<A, B> SpannedExpr<A, B> {
     // pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
     //         let range = self.0.1.into_range();
     //         if range.contains(&token_index) {
@@ -146,37 +255,8 @@ impl<A, B> SpannedExprTree<A, B> {
     //                         .map(|mut x| {
     // }
 
-    pub fn remove_span(self) -> FixExpr<A, B> {
+    pub fn remove_span(self) -> GExpr<A, B> {
         let expr = self.0.0.fmap(|e| Box::new(e.remove_span()));
-        FixExpr(expr)
-    }
-}
-
-pub type Spanned<T> = (T, Vec<usize>);
-
-impl<A: Display, B: Display> Display for FixExpr<A, B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            Expr::Var { idx: var_id } => write!(f, "{}", var_id),
-            // This is not clear how it should display
-            Expr::App { func, arg } => {
-                if let Expr::App { .. } = arg.0 {
-                    write!(f, "{} ({})", func, arg)
-                } else {
-                    write!(f, "{} {}", func, arg)
-                }
-            }
-            Expr::Lambda {
-                name: _,
-                param_ty,
-                body,
-            } => write!(f, "lambda {} => {}", param_ty, body),
-            Expr::Pi {
-                name: _,
-                param_ty,
-                ret_ty,
-            } => write!(f, "{} -> {}", param_ty, ret_ty),
-            Expr::Type => write!(f, "Type"),
-        }
+        GExpr(expr)
     }
 }

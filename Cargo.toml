@@ -3,3 +3,6 @@
 resolver = "3"
 
 members = ["rex", "rex-core", "rex-lsp", "rex-parser"]
+
+[workspace.metadata]
+rustflags = ["--allow", "warnings"]

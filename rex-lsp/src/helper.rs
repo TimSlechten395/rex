@@ -23,6 +23,7 @@ pub fn span_to_range(text: &ropey::Rope, span: std::ops::Range<usize>) -> Range 
     }
 }
 
+// ah yes a random function that does something
 pub fn map_index<E>(v: &[Spanned<Result<Token, E>>], n: usize) -> Option<usize> {
     if n >= v.len() {
         return None; // out of bounds

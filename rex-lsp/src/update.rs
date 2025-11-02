@@ -33,7 +33,7 @@ pub async fn update(backend: &Backend, uri: Uri, text: String) -> anyhow::Result
 
     let compiler = tokio::task::spawn_blocking(move || {
         let uri = uri2;
-        let lexer = rex::lexer();
+        let lexer = rex::lexer::lexer();
 
         let Ok(spanned_tokens) = lexer.parse(&text).into_result() else {
             bail!("Failed to lex file: {uri:?}")

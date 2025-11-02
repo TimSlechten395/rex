@@ -1,0 +1,89 @@
+// Types use ... -> ... and functions use ... => ...both are right associative
+
+// Unit (Top/True)
+def unit (x: A) : A := x
+
+// Never (Bottom/False)
+def Never: Type := (A: Type) -> A
+
+// Natural numbers
+// can we remove this (A: Type)? or would it then get inferred as (A: Type) => ...
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+def zero: Nat := (f: A -> A) => (x: A) => x
+def succ (n: Nat): Nat := (f: A -> A) => (x: A) => f (n A f x)
+
+def add (m: Nat) (n: Nat): Nat := (f: A -> A) => (x: A) => m A f (n A f x)
+def mul (m: Nat) (n: Nat): Nat := (f: A -> A) => (x: A) => m A (n A f) x
+// Wait should this be repeated multiplication or should this be n m
+def exp (m: Nat) (n: Nat): Nat := (f: A -> A) => (x: A) => n (A -> A) (m A) f x
+
+// Booleans (not to be confused with bottom and top)
+def Bool: Type := (A: Type) -> A -> A -> A
+def true: Bool := (t: A) => (f: A) => t
+def false: Bool := (t: A) => (f: A) => f
+
+
+def Pair (A: Type) (B: Type): Type := (C: Type) -> (A -> B -> C) -> C
+def pair (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B -> C) => f a b
+
+// note: Sigma A (_ => B) = Pair A B
+def Sigma (B: A -> Type): Type := (C: Type) -> ((a: A) -> B a -> C) -> C
+def sigma (B: A -> Type) (a: A) (b: B a): Sigma A B := (f: (a: A) -> B a -> C) => f a b
+
+// These are the projections
+def fst (p: Pair A B): A := p A ((a: A) => (b: B) => a)
+def snd (B: Type) (p: Pair A B): B := p B ((a: A) => (b: B) => b)
+
+def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
+
+// here both types being required would make more sense
+def left (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
+def right (A: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
+
+// what was this one again?
+def match (A: Type) (B: Type) (e: Either A B) (f: A -> C) (g: B -> C): C := e C f g
+
+
+// Expands to the following Exists (T: Type -> Type): Type := (R: Type) -> ((X: Type) -> T X -> R) -> R
+def Exists (T: Type -> Type) Type := Sigma Type ((X: Type) => T X)
+def pack (T: Type -> Type) (tx: T X): Exists T :=
+def unpack (T: Type -> Type) (e: Exists T) (k: (X: Type) -> T X -> R): R := e R k
+
+def Eq (x: A) (y: A): Type := (P: A -> Type) => (px: P x) => P y
+def refl (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+// Pointwise equality
+def Equiv (f: A -> B) (g: A -> B) : Type := (a: A) -> Eq B (f a) (g a)
+// A function is pointwise equal to itself
+def equiv_refl  (f: A -> B) : Equiv A B f f:= (a: A) => refl B (f a)
+
+def InverseLeft (f: A -> B) (g: B -> A): Type :=
+    (x: A) => Eq A (g (f x)) x
+def InverseRight (f: A -> B) (g: B -> A): Type :=
+    (y: B) => Eq B (f (g y)) y
+def Inverse: (f: A -> B) (g: B -> A): Type :=
+    Pair ((x: A) -> Eq A (g (f x)) x) ((y: B) -> Eq B (f (g y)) y)
+
+def Int: Type := (X: Type) -> (x: X) -> (f: X -> X) -> (g: X -> X) (p: Inverse X X f g) -> X
+def int_zero: Int := (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => x
+def int_succ (n: Int): Int := (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => f (n X x f g p)
+def int_pred (n: Int): Int := (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => g (n X x f g p)
+
+// U8 definition (built on Nats)
+def two: Nat := succ succ zero
+def eight: Nat := succ succ succ succ succ succ succ succ zero
+def pow_2_8: Nat := exp two eight
+
+def U8: Type := (A: Type) -> (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x)) => A
+def u8_zero: U8 := (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x) x) => x
+def u8_succ (n: U8): U8 := (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x) x) => f (n A f x p)
+
+def Z_combinator (f: A -> A) : A :=
+    ((x: (X: Type) -> A) => f ((v: A) => x x v))
+    ((x: (X: Type) -> A) => f ((v: A) => x x v))
+
+def Y_combinator (f: A -> A) : A :=
+  ((x: (X: Type) -> X -> A) => f (x x))
+  ((x: (X: Type) -> X -> A) => f (x x))
+
+

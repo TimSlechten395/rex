@@ -1,323 +1,237 @@
+use std::ops::Range;
+
 use crate::{
     lexer::{AbsoluteIndent, RelativeIndent, Token},
-    parser::{NormalSugarExpr, SpannedResultSugarExpr, SugarExpr},
+    parser::{LitKind, NormalSugarExpr, SpannedResultSugarExpr, SugarExpr, SugarExprError},
 };
-use rex_core::{Desugar, Expr, NamedFixExpr};
-use rex_core::{DesugarWithNames, FixExpr};
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Items(Vec<Assign>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Group(Assign);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Assign(Vec<Ann>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Ann(Vec<Lambda>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Lambda(Vec<FnTy>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FnTy(Vec<Pipe>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Pipe(Vec<Tuple>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Tuple(Vec<App>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct App(Vec<Atom>);
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Atom {
-    Group(Group),
-    Var(String),
-    Unit,
-    Type,
-    Lit(Lit),
-    TODO(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Lit {
-    String(String),
-    Number(f64),
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenTree {
     Leaf(Token<AbsoluteIndent>),
-    Group(Group),
+    Group(Vec<Spanned<TokenTree>>),
+    Dot(Vec<Spanned<TokenTree>>),
 }
 
-pub fn parse(tokens: Vec<Token<AbsoluteIndent>>) -> Items {
-    // TODO: This is not at all how we want to handle new_lines
+pub type Spanned<T> = (T, Range<usize>);
+
+// NOTE: our span is range_inclusive
+pub fn parse(tokens: Vec<Token<AbsoluteIndent>>, self_dep: bool) -> SpannedResultSugarExpr {
+    let end = tokens.len();
+
+    // indentation should be important
     let ignore_new_lines = tokens
         .into_iter()
+        .enumerate()
         .filter(|x| {
-            if let Token::Newline(AbsoluteIndent(n)) = x {
-                !(*n > 0 as usize)
+            if let Token::Newline(AbsoluteIndent(_)) = x.1 {
+                false
             } else {
                 true
             }
         })
         .collect::<Vec<_>>();
 
-    let items = ignore_new_lines.split(|x| {
-        if let Token::Newline(AbsoluteIndent(n)) = x {
-            *n == 0
-        } else {
-            false
+    let items = ignore_new_lines
+        .split(|x| if let Token::Def = x.1 { true } else { false })
+        .filter(|x| !x.is_empty());
+
+    SpannedResultSugarExpr((
+        Ok(SugarExpr::Module(
+            Vec::new(),
+            items
+                .map(|x| parse_assign(&parse_group_start(&mut x.to_vec().into_iter())))
+                .collect(),
+            self_dep,
+        )),
+        Range { start: 0, end },
+    ))
+}
+
+pub fn get_span_from_tree(tokens: &[Spanned<TokenTree>]) -> Range<usize> {
+    let start = tokens.first().map(|x| x.1.start).unwrap_or_default();
+    let end = tokens.last().map(|x| x.1.end).unwrap_or_default();
+
+    Range { start, end }
+}
+
+pub fn parse_assign(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::Assign));
+    let expr: Vec<_> = splits.map(|x| parse_ann(x)).collect();
+
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Binding(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+pub fn parse_ann(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::Colon));
+    let expr: Vec<_> = splits.map(|x| parse_lambda(x)).collect();
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Ann(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+pub fn parse_lambda(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::DoubleArrow));
+    let expr: Vec<_> = splits.map(|x| parse_pi(x)).collect();
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Lambda(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+pub fn parse_pi(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::Arrow));
+    let expr: Vec<_> = splits.map(|x| parse_pipe(x)).collect();
+
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Pi(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+pub fn parse_pipe(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::Pipe));
+    let expr: Vec<_> = splits.map(|x| parse_tuple(x)).collect();
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Pipe(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+pub fn parse_sigma(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::SemiColon));
+    let expr: Vec<_> = splits.map(|x| parse_dot(x)).collect();
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Sigma(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+pub fn parse_tuple(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let splits = tokens.split(|x| x.0 == TokenTree::Leaf(Token::Comma));
+    let expr: Vec<_> = splits.map(|x| parse_dot(x)).collect();
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::Tuple(expr)), get_span_from_tree(&tokens))),
+    }
+}
+
+// this is just like parens a special case
+pub fn parse_dot(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let new_tokens: Vec<Spanned<TokenTree>> = Vec::new();
+    let expr: Vec<_> = tokens.into_iter().fold(new_tokens, |mut acc, item| {
+        match acc.last() {
+            Some((TokenTree::Leaf(Token::Dot), _span)) => {
+                let _dot = acc.pop();
+                if let Some(prev) = acc.pop() {
+                    let new_token = match prev {
+                        (TokenTree::Dot(mut items), span) => {
+                            items.push(item.clone());
+                            (
+                                TokenTree::Dot(items),
+                                Range {
+                                    start: span.start,
+                                    end: item.1.end,
+                                },
+                            )
+                        }
+                        prev_item => (
+                            TokenTree::Dot(vec![prev_item.clone(), item.clone()]),
+                            Range {
+                                start: prev_item.1.start,
+                                end: item.1.end,
+                            },
+                        ),
+                    };
+                    acc.push(new_token);
+                } else {
+                    acc.push(item.clone());
+                }
+            }
+
+            _ => {
+                acc.push(item.clone());
+            }
         }
+        acc
     });
-
-    Items(
-        items
-            .map(|x| parse_assign(parse_group_start(x.to_vec())))
-            .collect(),
-    )
+    parse_app(&expr)
 }
 
-pub fn parse_assign(tokens: Vec<TokenTree>) -> Assign {
-    let splits = tokens.split(|x| *x == TokenTree::Leaf(Token::Assign));
-    let expr = splits.map(|x| parse_ann(x.to_vec())).collect();
-    Assign(expr)
-}
-
-pub fn parse_ann(tokens: Vec<TokenTree>) -> Ann {
-    let splits = tokens.split(|x| *x == TokenTree::Leaf(Token::Colon));
-    let expr = splits.map(|x| parse_fn(x.to_vec())).collect();
-    Ann(expr)
-}
-
-pub fn parse_fn(tokens: Vec<TokenTree>) -> Lambda {
-    let splits = tokens.split(|x| *x == TokenTree::Leaf(Token::DoubleArrow));
-    let expr = splits.map(|x| parse_fn_ty(x.to_vec())).collect();
-    Lambda(expr)
-}
-
-pub fn parse_fn_ty(tokens: Vec<TokenTree>) -> FnTy {
-    let splits = tokens.split(|x| *x == TokenTree::Leaf(Token::Arrow));
-    let expr = splits.map(|x| parse_pipe(x.to_vec())).collect();
-    FnTy(expr)
-}
-
-pub fn parse_pipe(tokens: Vec<TokenTree>) -> Pipe {
-    let splits = tokens.split(|x| *x == TokenTree::Leaf(Token::Pipe));
-    let expr = splits.map(|x| parse_tuple(x.to_vec())).collect();
-    Pipe(expr)
-}
-
-pub fn parse_tuple(tokens: Vec<TokenTree>) -> Tuple {
-    let splits = tokens.split(|x| *x == TokenTree::Leaf(Token::Comma));
-    let expr = splits.map(|x| parse_app(x.to_vec())).collect();
-    Tuple(expr)
-}
-
-pub fn parse_app(tokens: Vec<TokenTree>) -> App {
-    let expr = tokens
-        .into_iter()
-        .map(|x| match x {
-            TokenTree::Leaf(token) => match token {
-                Token::Type => Atom::Type,
-                Token::Ident(name) => Atom::Var(name),
-                Token::String(name) => Atom::Lit(Lit::String(name)),
-                Token::Number(num) => Atom::Lit(Lit::Number(num)),
-                token => Atom::TODO(format!("{:?}", {})),
-            },
-            TokenTree::Group(group) => Atom::Group(group),
+// this is the final case meaning it handles a list of expressions without delimiter
+pub fn parse_app(tokens: &[Spanned<TokenTree>]) -> SpannedResultSugarExpr {
+    let expr: Vec<_> = tokens
+        .iter()
+        .map(|x| {
+            let token = match x.0.clone() {
+                TokenTree::Leaf(token) => match token {
+                    Token::Type => Ok(SugarExpr::Type),
+                    Token::Ident(name) => Ok(SugarExpr::Var(name)),
+                    Token::String(name) => Ok(SugarExpr::Lit(LitKind::String(name))),
+                    Token::Number(x) => Ok(SugarExpr::Lit(LitKind::Number(x))),
+                    token => Err(SugarExprError::InvalidToken(token)),
+                },
+                TokenTree::Group(group) => Ok(SugarExpr::Group(Box::new(parse_assign(&group)))),
+                TokenTree::Dot(items) => Ok(SugarExpr::Dot(
+                    items.into_iter().map(|x| parse_assign(&[x])).collect(),
+                )),
+            };
+            SpannedResultSugarExpr((token, x.1.clone()))
         })
         .collect();
-    App(expr)
+    match expr.len() {
+        0 => SpannedResultSugarExpr((Ok(SugarExpr::Unit), get_span_from_tree(&tokens))),
+        1 => expr.first().unwrap().clone(),
+        _ => SpannedResultSugarExpr((Ok(SugarExpr::App(expr)), get_span_from_tree(&tokens))),
+    }
 }
 
-// interesting this generates token errors instead of ExprErrors
-fn parse_group_start(tokens: Vec<Token<AbsoluteIndent>>) -> Vec<TokenTree> {
+// TODO: return errors instead
+fn parse_group_start<I>(tokens: &mut I) -> Vec<Spanned<TokenTree>>
+where
+    I: Iterator<Item = (usize, Token<AbsoluteIndent>)>,
+{
     let mut trees = Vec::new();
 
-    let mut iter = tokens.into_iter().peekable();
-
-    while let Some(tok) = iter.next() {
+    while let Some((i, tok)) = tokens.next() {
         match tok {
             Token::LParen => {
-                let group = parse_group_end(&mut iter);
-                trees.push(TokenTree::Group(group));
+                let group = parse_group_end(tokens, i);
+                trees.push(group);
             }
             Token::RParen => panic!("unexpected closing parenthesis"),
-            _ => trees.push(TokenTree::Leaf(tok.clone())),
+            _ => trees.push((TokenTree::Leaf(tok.clone()), Range { start: i, end: i })),
         }
     }
 
-    trees.reverse();
     trees
 }
 
-fn parse_group_end<I>(iter: &mut std::iter::Peekable<I>) -> Group
+fn parse_group_end<I>(iter: &mut I, start: usize) -> Spanned<TokenTree>
 where
-    I: Iterator<Item = Token<AbsoluteIndent>>,
+    I: Iterator<Item = (usize, Token<AbsoluteIndent>)>,
 {
     let mut inner = Vec::new();
 
-    while let Some(tok) = iter.next() {
+    while let Some((i, tok)) = iter.next() {
         match tok {
             Token::LParen => {
-                let group = parse_group_end(iter);
-                inner.push(TokenTree::Group(group));
+                let group = parse_group_end(iter, i);
+                inner.push(group);
             }
-            Token::RParen => return Group(parse_assign(inner)),
-            _ => inner.push(TokenTree::Leaf(tok)),
+            Token::RParen => return (TokenTree::Group(inner), Range { start, end: i }),
+            _ => inner.push((TokenTree::Leaf(tok), Range { start: i, end: i })),
         }
     }
     panic!("unterminated paren group")
-}
-
-impl DesugarWithNames for Atom {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        match self {
-            Atom::Group(group) => group.desugar_with_names(),
-            Atom::Var(s) => Expr::Var { idx: s },
-            Atom::Unit => Expr::Type,
-            Atom::Type => Expr::Type,
-            Atom::Lit(lit) => Expr::Type,
-            Atom::TODO(_) => Expr::Type,
-        }
-    }
-}
-
-impl DesugarWithNames for App {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        if self.0.len() == 0 {
-            FixExpr(Expr::Type)
-        } else if self.0.len() == 1 {
-            self.0.get(0).unwrap().desugar_with_names()
-        } else {
-            let mut iter = self.0.clone().into_iter().rev();
-            let base = iter.next().unwrap().desugar_with_names();
-
-            iter.fold(base, |acc, item| {
-                FixExpr(Expr::App {
-                    func: Box::new(item.desugar_with_names()),
-                    arg: Box::new(acc),
-                })
-            })
-        }
-    }
-}
-
-impl DesugarWithNames for Pipe {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        if self.0.len() == 0 {
-            FixExpr(Expr::Type)
-        } else if self.0.len() == 1 {
-            self.0.get(0).unwrap().desugar_with_names()
-        } else {
-            let mut iter = self.0.clone().into_iter();
-            let base = iter.next().unwrap().desugar_with_names();
-
-            iter.fold(base, |acc, item| {
-                FixExpr(Expr::App {
-                    func: Box::new(item.desugar_with_names()),
-                    arg: Box::new(acc),
-                })
-            })
-        }
-    }
-}
-
-// TODO:
-impl DesugarWithNames for Tuple {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        if self.0.len() == 0 {
-            FixExpr(Expr::Type)
-        } else if self.0.len() == 1 {
-            self.0.get(0).unwrap().desugar_with_names()
-        } else {
-            let f_var = "f".to_string();
-            let mut body = Expr::Var { idx: f_var.clone() };
-
-            for (i, e) in items.into_iter().enumerate() {
-                let desugared = desugar(*e, loc.clone())?;
-                body = Expr::App {
-                    // TODO: check this loc
-                    func: Box::new(SpannedExprTree((body, loc.clone()))),
-                    arg: Box::new(desugared),
-                };
-            }
-
-            (
-                Expr::Lambda {
-                    name: f_var.clone(),
-                    param_ty: Box::new(SpannedExprTree((Expr::Type, loc.clone()))),
-                    body: Box::new(SpannedExprTree((body, loc.clone()))),
-                },
-                loc.clone(),
-            )
-        }
-    }
-}
-
-impl DesugarWithNames for FnTy {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        fold_vec_right(&self.0, |_, expr| expr)
-    }
-}
-
-impl DesugarWithNames for Lambda {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        fold_vec_right(&self.0, |binding, expr| {
-            let name = match binding.0 {
-                Expr::Var { idx } => None,
-                Expr::App { func, arg } => None,
-                Expr::Lambda {
-                    name,
-                    param_ty,
-                    body,
-                } => todo!(),
-                Expr::Pi {
-                    name,
-                    param_ty,
-                    ret_ty,
-                } => todo!(),
-                Expr::Type => todo!(),
-            };
-
-            let ty = match binding.0 {
-                Expr::Var { idx } => None,
-                Expr::App { func, arg } => todo!(),
-                Expr::Lambda {
-                    name,
-                    param_ty,
-                    body,
-                } => todo!(),
-                Expr::Pi {
-                    name,
-                    param_ty,
-                    ret_ty,
-                } => todo!(),
-                Expr::Type => todo!(),
-            };
-
-            FixExpr(Expr::Lambda {
-                name: String::new(),
-                param_ty: Box::new(Expr::Type),
-                body: expr,
-            })
-        })
-    }
-}
-
-impl DesugarWithNames for Ann {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        fold_vec_right(&self.0, |_, expr| expr)
-    }
-}
-
-impl DesugarWithNames for Assign {
-    fn desugar_with_names(&self) -> NamedFixExpr {
-        fold_vec_right(&self.0, |first, second| second) // or some other rule
-    }
 }

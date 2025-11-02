@@ -1,0 +1,111 @@
+f : X -> Y
+f' : (x : X) -> (dx : X -> X) -> (dy : Y -> Y) with f . dx = dy . f
+
+
+
+ x => f' dx = dy
+
+
+
+f : Y -> Z
+f' : (y : Y) -> (dy : Y -> Y) -> (dy : Z -> Z) with f . dy = dz . f
+f' (y : Y) : (dx : Y -> Y) -> (dy : Z -> Z) with f . dy = dz . f
+
+g : X -> Y
+g' : (x : X) -> (dx : X -> X) -> (dy : Y -> Y) with g . dx = dy . g
+g' (x : X) : (dx : X -> X) -> (dy : Y -> Y) with g . dx = dy . g
+
+(f . g)' : X -> (X -> X) -> Z -> Z
+= x => f' (g x) . (g' x): X -> (X -> X) -> Z -> Z
+
+------------------------------------
+one hole context
+
+F : Type -> Type // (X : Type) => List X
+
+F' : (x : Type) -> (dx : Type -> Type) -> (dy: Type -> Type) // (X: Type => (dx: Type -> Type) => F X)       with F . dx = dy . F
+
+F' : (x : Type) -> (dy: Type -> Type)
+
+WHAT SHOULD DX BE???????????????????
+IT CANNOT BE HARD
+maybe Ycomb?
+dx : Type -> Type
+
+-----------------------------------
+generalizing addition and multiplication
+
+
+def Pair (A: Type) (B: Type): Type := (C: Type) -> (A -> B -> C) -> C
+def pair (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B -> C) => f a b
+
+def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
+def left (A: Type) (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
+def right (A: Type) (B: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
+
+
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+
+
+def add (m: Nat) (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m f (n f x)
+
+
+
+def mul (m: Nat) (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => n (m f) x
+
+
+x is Unit
+f is Unit -> Unit
+
+def Pair (A: Type) (B: Type): Type := (A -> B -> C) -> C
+def Pair (A: Type) (B: Type): Type := (A -> B -> C) -> C
+
+
+
+def add (m: Nat) (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m f (n f x)
+
+x: Type := C
+f: Type -> Type := (C: Type) => Type -> C 
+
+m: (Type -> Type) -> Type -> Type: (f: Type -> Type) => (x: Type) => A -> f x
+
+n: (Type -> Type) -> Type -> Type: (f: Type -> Type) => (x: Type) => B -> f x
+
+def Either (A: Type) (B: Type): Type := (A -> C) -> (B -> C) -> C
+
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+choose A == Type
+
+Nat: Type := (Type -> Type) -> Type -> Type
+
+
+
+-----------------------------------
+
+f' : (F : Type -> Type) (X : Type) : Type := F X ? or F F X?
+
+example a recursive list
+List X := Ycomb (R => (Unit | (X, R)))
+
+then we get: List X := (R => R
+
+
+for example
+Maybe X : Type -> Type := (Y: Type) => Either X Y
+
+Ycomb: (Type -> Type) -> Type
+
+-----------------------------------
+
+calculus derivative
+
+cauchy sequence is just a sequence of fractional number
+
+S: Ycomb (R => Pair Rat R)
+
+// TODO: S n will not work directly we need projections for that: proj1 . (n proj2)
+cauchy property: (e: Rat) -> e >= 0 -> ((r: Nat); (n: Nat) -> n > r -> (m: Nat) -> m > r -> abs (S n - S m) < e)
+reel number: (S: E)
+

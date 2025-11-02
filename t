@@ -9,7 +9,7 @@ def Never: Type := (A: Type) -> A
 // Natural numbers
 def Nat: Type := (A: Type) -> (A -> A) -> A -> A
 def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
-def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+def succ (n: Nat): Nat := (n: Nat) => (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
 
 def add (m: Nat) (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
 def mul (m: Nat) (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A (n A f) x
@@ -36,11 +36,13 @@ def snd (A: Type) (B: Type) (p: Pair A B): B := p B ((a: A) => (b: B) => b)
 def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
 def left (A: Type) (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
 def right (A: Type) (B: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
-// def match (A: Type) (B: Type) (e: Either A B) (f: A -> C) (g: B -> C): C := e C f g
+def match (A: Type) (B: Type) (e: Either A B) (f: A -> C) (g: B -> C): C := e C f g
+
 
 // Expands to the following Exists (T: Type -> Type): Type := (R: Type) -> ((X: Type) -> T X -> R) -> R
 def Exists (T: Type -> Type): Type := Sigma Type ((X: Type) => T X)
 def pack (T: Type -> Type) (X: Type) (tx: T X): Exists T :=
+def sigma Type ((X: Type) => T X) X tx
 def unpack (T: Type -> Type) (e: Exists T) (R: Type) (k: (X: Type) -> T X -> R): R := e R k
 
 def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) => (px: P x) => P y
@@ -55,10 +57,10 @@ def InverseLeft (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
     (x: A) => Eq A (g (f x)) x
 def InverseRight (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
     (y: B) => Eq B (f (g y)) y
-def Inverse (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
+def Inverse: (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
     Pair ((x: A) -> Eq A (g (f x)) x) ((y: B) -> Eq B (f (g y)) y)
 
-def Int: Type := (X: Type) -> (x: X) -> (f: X -> X) -> (g: X -> X) -> (p: Inverse X X f g) -> X
+def Int: Type := (X: Type) -> (x: X) -> (f: X -> X) -> (g: X -> X) (p: Inverse X X f g) -> X
 def int_zero: Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => x
 def int_succ (n: Int): Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => f (n X x f g p)
 def int_pred (n: Int): Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => g (n X x f g p)

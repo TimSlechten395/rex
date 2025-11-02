@@ -11,3 +11,4 @@ rex-core = { path = "../rex-core" }
 smallvec = "1.15.1"
 anyhow = "*"
 thiserror = "*"
+num-bigint = "0.4.6"

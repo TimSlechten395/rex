@@ -1,0 +1,2 @@
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+def five: Nat := 5

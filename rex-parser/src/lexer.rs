@@ -1,8 +1,12 @@
 use std::fmt::Display;
+use std::ops::Range;
+use std::str::FromStr;
 
+use anyhow::anyhow;
 use chumsky::prelude::*;
 use chumsky::span::SimpleSpan;
 use chumsky::text::{digits, ident, newline, whitespace};
+use num_bigint::BigUint;
 
 // TODO: Think about how to handle inert and error tokens, same for nodes
 // I think we should not pass them to the parser since they will be ingored anyway.
@@ -28,6 +32,7 @@ impl Token<RelativeIndent> {
             Token::Number(n) => Token::Number(n),
             Token::String(s) => Token::String(s),
 
+            Token::Def => Token::Def,
             Token::Fn => Token::Fn,
             Token::Dot => Token::Dot,
             Token::Colon => Token::Colon,
@@ -82,10 +87,11 @@ pub enum InertToken {
 // generic over tab_kind
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<Indent> {
-    Ident(String),  // variable names, e.g. x, foo
-    Number(f64),    // integer literals
-    String(String), // 'atoms
+    Ident(String),   // variable names, e.g. x, foo
+    Number(BigUint), // integer literals
+    String(String),  // 'atoms
 
+    Def,       // 'def'
     Fn,        // 'fn'
     Dot,       // '.'
     Colon,     // ':'
@@ -139,6 +145,7 @@ impl Display for Token<AbsoluteIndent> {
             Token::String(s) => write!(f, "\"{}\"", s),
 
             Token::Fn => write!(f, "fn"),
+            Token::Def => write!(f, "Def"),
             Token::Dot => write!(f, "."),
             Token::Colon => write!(f, ":"),
             Token::SemiColon => write!(f, ";"),
@@ -175,24 +182,27 @@ impl Display for Token<AbsoluteIndent> {
 
 // type Span = std::ops::Range<usize>;
 
-fn number_parser<'a>() -> impl Parser<'a, &'a str, f64, extra::Err<Rich<'a, char>>> {
-    let digits = text::digits(10).to_slice();
-
-    let frac = just('.').then(digits);
-
-    let exp = just('e')
-        .or(just('E'))
-        .then(one_of("+-").or_not())
-        .then(digits);
-
-    just('-')
-        .or_not()
-        .then(text::int(10))
-        .then(frac.or_not())
-        .then(exp.or_not())
+fn number_parser<'a>() -> impl Parser<'a, &'a str, BigUint, extra::Err<Rich<'a, char>>> {
+    text::digits(10)
         .to_slice()
-        .map(|s: &str| s.parse().unwrap())
-        .boxed()
+        .map(|x| BigUint::from_str(x).unwrap())
+    // let digits = text::digits(10).to_slice();
+    //
+    // let frac = just('.').then(digits);
+    //
+    // let exp = just('e')
+    //     .or(just('E'))
+    //     .then(one_of("+-").or_not())
+    //     .then(digits);
+    //
+    // just('-')
+    //     .or_not()
+    //     .then(text::int(10))
+    //     .then(frac.or_not())
+    //     .then(exp.or_not())
+    //     .to_slice()
+    //     .map(|s: &str| s.parse().unwrap())
+    //     .boxed()
 }
 
 fn count_indent(line: &str) -> usize {
@@ -240,6 +250,7 @@ pub fn lexer<'a>() -> impl Parser<
         // "cdr" => Token::Cdr,
         // "cons" => Token::Cons,
         // "Pair" => Token::Pair,
+        "def" => Token::Def,
         "Type" => Token::Type,
         // "just" => Token::Just,
         "loop" => Token::Loop,
@@ -300,4 +311,62 @@ pub fn lexer<'a>() -> impl Parser<
 
     let normal_token = expected_token.or(invalid).repeated().collect::<Vec<_>>();
     normal_token
+}
+
+// maps span from Vec<Token> to Vec<Result<Token>>
+pub fn tok_span_to_result_tok_span(
+    span: Range<usize>,
+    full_tokens: &[(
+        Result<ExpectedToken<AbsoluteIndent>, ErrorToken>,
+        Range<usize>,
+    )],
+) -> anyhow::Result<Range<usize>> {
+    let mut ok_count = 0;
+    let mut start_idx = None;
+    let mut end_idx = None;
+    for (i, t) in full_tokens.iter().enumerate() {
+        if matches!(t.0, Ok(ExpectedToken::Token(_))) {
+            if ok_count == span.start {
+                start_idx = Some(i)
+            }
+            if ok_count == span.end {
+                end_idx = Some(i);
+                break;
+            }
+            ok_count += 1;
+        }
+    }
+
+    let start = start_idx.ok_or(anyhow!("start index not in range"))?;
+
+    let end = end_idx.ok_or(anyhow!("end index not in range"))?;
+    Ok(start..end)
+}
+
+pub fn result_tok_span_to_char_span(
+    span: Range<usize>,
+    toks: &[(
+        Result<ExpectedToken<AbsoluteIndent>, ErrorToken>,
+        Range<usize>,
+    )],
+) -> anyhow::Result<Range<usize>> {
+    // our range is inclusive but chumsky span is exclusive
+    let start = toks
+        .get(span.start)
+        .ok_or(anyhow!("start token not in stream: {:?}", span.start))?
+        .1
+        .start;
+    let end = toks
+        .get(span.end)
+        .ok_or(anyhow!(
+            "end token not in stream: {:?} len: {:?}",
+            span.end,
+            toks.len()
+        ))?
+        .1
+        .end;
+    Ok(Range {
+        start,
+        end: end - 1,
+    })
 }

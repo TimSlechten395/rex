@@ -1,169 +1,194 @@
-use rex_core::Expr;
+use rex_core::{Expr, ExprF, GExpr};
 
-use crate::sea_nodes::{NodeId, SeaOfNodes};
+use crate::sea_nodes::{ExprId, SeaOfNodes};
 
 // what is cutoff?
-fn shift(expr_id: NodeId, delta: isize, cutoff: usize, sea: &mut SeaOfNodes) -> NodeId {
-    let expr = sea.get_node(expr_id).unwrap();
-    let expr = match expr.clone() {
-        Expr::Var { idx } => {
+fn shift(expr: Expr, delta: isize, cutoff: usize) -> Expr {
+    let expr = match expr.0.clone() {
+        ExprF::Var { idx } => {
             if idx >= cutoff {
                 // k + d
                 let k_i = idx as isize + delta;
                 assert!(k_i >= 0, "shift resulted in negative index");
-                Expr::Var { idx: k_i as usize }
+                ExprF::Var { idx: k_i as usize }
             } else {
-                Expr::Var { idx }
+                ExprF::Var { idx }
             }
         }
-        Expr::Lambda { param_ty, body, .. } => {
-            let param_ty = shift(param_ty, delta, cutoff, sea);
-            let body = shift(body, delta, cutoff + 1, sea);
-            Expr::Lambda {
+        ExprF::Lambda { param_ty, body, .. } => {
+            let param_ty = Box::new(shift(*param_ty, delta, cutoff));
+            let body = Box::new(shift(*body, delta, cutoff + 1));
+            ExprF::Lambda {
                 name: (),
                 param_ty,
                 body,
             }
         }
-        Expr::Pi {
+        ExprF::Pi {
             param_ty, ret_ty, ..
         } => {
-            let param_ty = shift(param_ty, delta, cutoff, sea);
-            let ret_ty = shift(ret_ty, delta, cutoff + 1, sea);
-            Expr::Pi {
+            let param_ty = Box::new(shift(*param_ty, delta, cutoff));
+            let ret_ty = Box::new(shift(*ret_ty, delta, cutoff + 1));
+            ExprF::Pi {
                 name: (),
                 param_ty,
                 ret_ty,
             }
         }
-        Expr::App { func, arg } => {
-            let func = shift(func, delta, cutoff, sea);
-            let arg = shift(arg, delta, cutoff, sea);
-            Expr::App { func, arg }
+        ExprF::App { func, arg } => {
+            let func = Box::new(shift(*func, delta, cutoff));
+            let arg = Box::new(shift(*arg, delta, cutoff));
+            ExprF::App { func, arg }
         }
         other => other,
     };
-    sea.add_node(expr)
+    GExpr(expr)
 }
 
-// take an function an and argument apply and return the new node id.
-// for now we only substiture directly so no shifts need to happen.
-// unwraps can never fail here.
-// A special fold function would be nice here as well.
-fn substitute(index: usize, func: NodeId, arg: NodeId, sea: &mut SeaOfNodes) -> NodeId {
-    let node = sea.get_node(func).unwrap();
-    match *node {
-        Expr::Var { idx } => {
+// do we need the index here?
+fn substitute(index: usize, func: Expr, arg: Expr) -> Expr {
+    let expr = match func.0 {
+        ExprF::Var { idx } => {
             if idx == index {
-                arg
+                arg.0
             } else {
-                func
+                func.0
             }
         }
         //
-        Expr::Lambda { param_ty, body, .. } => {
+        ExprF::Lambda { param_ty, body, .. } => {
             // The only important part of this function
-            let arg_shifted = shift(arg, 1, 0, sea);
-            let body = substitute(index + 1, body, arg_shifted, sea);
-            let new = Expr::Lambda {
+            let arg_shifted = shift(arg, 1, 0);
+            let body = Box::new(substitute(index + 1, *body, arg_shifted));
+            ExprF::Lambda {
                 name: (),
                 param_ty,
                 body,
-            };
+            }
             // This might be a problem
-            sea.add_node(new)
         }
-        Expr::App {
+        ExprF::App {
             func: app_func,
             arg: app_arg,
         } => {
-            let app_func = substitute(index, app_func, arg, sea);
-            let app_arg = substitute(index, app_arg, arg, sea);
-            let new = Expr::App {
+            let app_func = Box::new(substitute(index, *app_func, arg.clone()));
+            let app_arg = Box::new(substitute(index, *app_arg, arg));
+            ExprF::App {
                 func: app_func,
                 arg: app_arg,
-            };
-            sea.add_node(new)
+            }
         }
-        Expr::Pi {
+        ExprF::Pi {
             param_ty, ret_ty, ..
         } => {
-            let param_ty = substitute(index, param_ty, arg, sea);
+            let param_ty = Box::new(substitute(index, *param_ty, arg.clone()));
 
-            let arg_shifted = shift(arg, 1, 0, sea);
-            let ret_ty = substitute(index, ret_ty, arg_shifted, sea);
+            let arg_shifted = shift(arg, 1, 0);
+            let ret_ty = Box::new(substitute(index, *ret_ty, arg_shifted));
 
-            let new = Expr::Pi {
+            ExprF::Pi {
                 name: (),
                 param_ty,
                 ret_ty,
-            };
-            sea.add_node(new)
+            }
         }
-        _ => func,
-    }
-}
-
-// TODO: Should we pass in expr_id or generic Expr<T>
-//
-// weak normalize make sure there is no application at the end
-pub fn normalize(expr_id: NodeId, sea: &mut SeaOfNodes) -> NodeId {
-    let expr = sea.get_node(expr_id).unwrap();
-
-    if let &Expr::App { func, arg } = expr {
-        let func = normalize(func, sea);
-        substitute(0, func, arg, sea)
-    } else {
-        expr_id
-    }
-}
-
-// This is normal execution. basically a small interpreter
-pub fn eager_normalize(expr_id: NodeId, sea: &mut SeaOfNodes) -> NodeId {
-    let expr = sea.get_node(expr_id).unwrap();
-    if let &Expr::App { func, arg } = expr {
-        let func = normalize(func, sea);
-        let arg = normalize(arg, sea);
-        let new_expr = substitute(0, func, arg, sea);
-        new_expr
-    } else {
-        expr_id
-    }
-}
-
-// normalize everything, even inside lambdas.
-// TODO: This functions does to much. Reading and writing the cache should be done at a
-// higher level
-pub fn strong_normalize(expr: NodeId, sea: &mut SeaOfNodes) -> NodeId {
-    let new_expr = if let Some(new_expr) = sea.cache.get(&expr).cloned() {
-        new_expr
-    } else {
-        let expr_node = sea.get_node(expr).unwrap();
-        let new_expr = match *expr_node {
-            Expr::App { func, arg } => {
-                let func = strong_normalize(func, sea);
-                let arg = strong_normalize(arg, sea);
-                substitute(0, func, arg, sea)
-            }
-            Expr::Lambda { param_ty, body, .. } => strong_normalize(body, sea),
-            Expr::Pi {
-                param_ty, ret_ty, ..
-            } => {
-                let param_ty = strong_normalize(param_ty, sea);
-                let ret_ty = strong_normalize(ret_ty, sea);
-                let new_expr = Expr::Pi {
-                    name: (),
-                    param_ty,
-                    ret_ty,
-                };
-
-                sea.add_node(new_expr)
-            }
-            _ => expr,
-        };
-        new_expr
+        func => func,
     };
-    // Do we need to do this
-    sea.cache.insert(expr, new_expr);
-    new_expr
+    GExpr(expr)
+}
+
+pub fn weak_head_normal_form(expr: Expr) -> Expr {
+    match expr.0 {
+        ExprF::App { func, arg } => {
+            let func_eval = weak_head_normal_form(*func);
+
+            match func_eval.0 {
+                ExprF::Lambda { body, .. } => {
+                    let result = substitute(0, *body, *arg);
+                    weak_head_normal_form(result)
+                }
+                _ => GExpr(ExprF::App {
+                    func: Box::new(func_eval),
+                    arg,
+                }),
+            }
+        }
+        other => GExpr(other),
+    }
+}
+
+pub fn head_normal_form(expr: Expr) -> Expr {
+    match expr.0 {
+        ExprF::Lambda { param_ty, body, .. } => {
+            let param_ty = Box::new(head_normal_form(*param_ty));
+            let body = Box::new(head_normal_form(*body));
+            GExpr(ExprF::Lambda {
+                name: (),
+                param_ty,
+                body,
+            })
+        }
+        ExprF::Pi {
+            param_ty, ret_ty, ..
+        } => {
+            let param_ty = Box::new(head_normal_form(*param_ty));
+            let ret_ty = Box::new(head_normal_form(*ret_ty));
+            GExpr(ExprF::Pi {
+                name: (),
+                param_ty,
+                ret_ty,
+            })
+        }
+        ExprF::App { func, arg } => {
+            let func_eval = head_normal_form(*func);
+
+            match func_eval.0 {
+                ExprF::Lambda { body, .. } => {
+                    let result = substitute(0, *body, *arg);
+                    head_normal_form(result)
+                }
+                _ => GExpr(ExprF::App {
+                    func: Box::new(func_eval),
+                    arg,
+                }),
+            }
+        }
+        _ => expr,
+    }
+}
+
+pub fn normal_form(expr: Expr) -> Expr {
+    match expr.0 {
+        ExprF::Lambda { param_ty, body, .. } => {
+            let param_ty = Box::new(normal_form(*param_ty));
+            let body = Box::new(normal_form(*body));
+            GExpr(ExprF::Lambda {
+                name: (),
+                param_ty,
+                body,
+            })
+        }
+        ExprF::Pi {
+            param_ty, ret_ty, ..
+        } => {
+            let param_ty = Box::new(normal_form(*param_ty));
+            let ret_ty = Box::new(normal_form(*ret_ty));
+            GExpr(ExprF::Pi {
+                name: (),
+                param_ty,
+                ret_ty,
+            })
+        }
+        ExprF::App { func, arg } => {
+            let func = normal_form(*func);
+            match func.0 {
+                ExprF::Lambda { body, .. } => normal_form(substitute(0, *body, *arg)),
+                _ => GExpr(ExprF::App {
+                    func: Box::new(func),
+                    arg: Box::new(normal_form(*arg)),
+                }),
+            }
+        }
+        _ => expr,
+    }
 }

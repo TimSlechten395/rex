@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 functor_derive = "0.4.3"
 anyhow = "*"
+either = "1.15.0"
+thiserror = "2.0.17"
