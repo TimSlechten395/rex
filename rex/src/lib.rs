@@ -1,41 +1,55 @@
 use anyhow::{Context as _, anyhow, bail};
-use rex_parser::lexer::{ExpectedToken, result_tok_span_to_char_span, tok_span_to_result_tok_span};
-use rex_parser::new_parser::parse;
-use rex_parser::parser::{get_normal_expr, remove_span};
 use std::fs::read_to_string;
 use std::ops::Range;
 
 use chumsky::Parser;
-pub use rex_parser;
-pub use rex_parser::*;
 
-pub use rex_core;
-pub use rex_core::*;
-
-pub mod desugar;
-pub use desugar::*;
-
+use crate::data::ast::{get_normal_expr, remove_span};
+use crate::data::expr::{Expr, ExprError, ExprF, GExpr, remove_span_expr};
+use crate::data::tokens::{
+    ExpectedToken, result_tok_span_to_char_span, tok_span_to_result_tok_span,
+};
+use crate::pipeline::desugar::desugar;
+use crate::pipeline::name_resolver::{ResolveError, to_indices};
+use crate::pipeline::{lexer::lexer, parser::parse};
 use crate::r#type::infer_type;
+
+pub mod data;
+pub mod pipeline;
 
 pub mod eval;
 
-pub mod experimental;
-
+pub mod helper;
 pub mod r#type;
 
-pub mod repl;
+pub mod cache;
+pub mod experimental;
 
-pub mod autoconvert;
-pub mod context;
+pub trait Traverse {
+    type Span;
+    fn traverse(self, span: Self::Span) -> anyhow::Result<Box<Self>>;
+}
 
-pub mod sea_nodes;
+pub trait CompileError<S> {
+    fn span(&self) -> S;
+}
 
-pub mod lower;
+pub type Spanned<T, S> = (T, S);
+
+// here we get the wrong error
+pub trait Compile {
+    type Output;
+    type Error;
+    type Span;
+
+    fn run(self) -> Result<Spanned<Self::Output, Self::Span>, Self::Error>;
+}
+
 pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
     let path = path;
     let file = read_to_string(path)?;
 
-    let lexer = lexer::lexer();
+    let lexer = lexer();
 
     let toks = lexer
         .parse(&file)
@@ -126,7 +140,8 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
         tree
     };
 
-    infer_type(expr.clone(), &mut Vec::new(), &mut Vec::new(), Vec::new())?.v_err();
+    // TODO: fix
+    infer_type(expr.clone(), &mut Vec::new(), &mut Vec::new(), Vec::new()).map_err(|err| err)?;
 
     Ok(expr)
 }

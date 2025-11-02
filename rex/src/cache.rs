@@ -3,12 +3,8 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
 };
 
-use rex_core::GExpr;
-use thiserror::Error;
+use crate::data::expr::{Expr, ExprF, GExpr};
 
-use crate::{Expr, ExprF};
-
-// We need hashes if we want parallell compilation. different cores need to end up with the same
 // hash for equal expressions
 pub type ExprId = u64;
 

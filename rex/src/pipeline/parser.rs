@@ -1,8 +1,8 @@
 use std::ops::Range;
 
-use crate::{
-    lexer::{AbsoluteIndent, Token},
-    parser::{LitKind, SpannedResultSugarExpr, SugarExpr, SugarExprError},
+use crate::data::{
+    ast::{LitKind, SpannedResultSugarExpr, SugarExpr, SugarExprError},
+    tokens::{AbsoluteIndent, Token},
 };
 
 #[derive(Debug, Clone, PartialEq)]

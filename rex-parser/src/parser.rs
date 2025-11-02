@@ -4,8 +4,6 @@ use std::ops::Range;
 
 use anyhow::anyhow;
 use anyhow::bail;
-use chumsky::{container::Container, input::ValueInput, prelude::*};
-use either::Either::{self, Right};
 use functor_derive::Functor;
 use num_bigint::BigUint;
 use std::fmt;
@@ -16,8 +14,6 @@ use crate::lexer::Token;
 
 // Later all idents will become syntactic sugar for indices
 
-// This could have a variant Common(Expr<SugarExpr>). But we need lambda, pi and var seperate
-// anyway
 // TODO: Is this even worth it to have?
 #[derive(Debug, Clone, PartialEq, Functor)]
 pub enum SugarExpr<T> {

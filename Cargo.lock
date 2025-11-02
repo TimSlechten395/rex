@@ -718,8 +718,6 @@ dependencies = [
  "functor_derive",
  "num-bigint",
  "rand",
- "rex-core",
- "rex-parser",
  "rustyline",
  "thiserror",
 ]

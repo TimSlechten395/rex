@@ -9,8 +9,8 @@ use num_bigint::BigUint;
 use std::fmt;
 use thiserror::Error;
 
-use crate::lexer::AbsoluteIndent;
-use crate::lexer::Token;
+use crate::data::tokens::AbsoluteIndent;
+use crate::data::tokens::Token;
 
 // Later all idents will become syntactic sugar for indices
 

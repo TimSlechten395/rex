@@ -1,21 +1,8 @@
 
-// pub fn get_definition<'a>()
-// -> impl Parser<'a, &'a [Token], ((String, SugarExpr), SugarExpr), extra::Err<Rich<'a, Token>>> {
-//     let ident = select! {
-//     Token::Ident(name) => name,};
-//
-//     just(Token::Let)
-//         .ignore_then(ident)
-//         .then_ignore(just(Token::Colon))
-//         .then(crate::parser())
-//         .then_ignore(just(Token::Eq))
-//         .then(crate::parser())
-// }
 use functor_derive::Functor;
 use num_bigint::BigUint;
 
-use crate::{desugar::{Expr, ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr, VarKind}, helper::push_new, parser::{LitKind, NormalSugarExpr, SugarExpr}};
-
+use crate::{data::{ast::{LitKind, NormalSugarExpr, SugarExpr}, expr::{ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr, VarKind}}, helper::push_new};
 
 // (R : Type) => (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) => f x y z
 // pub fn create_church_accessors(expr: NamedExpr, field_name: String) -> Option<NamedExpr> {
@@ -679,75 +666,3 @@ pub fn create_sigma(
     )))
 }
 
-pub type Context = Vec<VarKind<String, ()>>;
-
-pub fn resolve(name: String, ctx: &mut Context) -> Option<usize> {
-    ctx.iter()
-        .rev()
-        .position(|n| *n == VarKind::Named(name.clone()))
-}
-
-#[derive(thiserror::Error, Functor, Debug)]
-pub enum ResolveError<T> {
-    #[error("failed to resolve variable {0:?} at {1:?} ")]
-    ResolveFailed(String, T),
-}
-
-// zipper needed
-pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Context)>> {
-    fn go(
-        expr: NamedExpr,
-        env: &mut Context,
-        loc: Vec<usize>,
-    ) -> Result<Expr, ResolveError<(Vec<usize>, Context)>> {
-        let expr = match expr.0 {
-            ExprF::Var { idx: x } => match x {
-                VarKind::Named(x) => {
-                    if let Some(pos) = resolve(x.clone(), env) {
-                        ExprF::Var { idx: pos }
-                    } else {
-                        return Err(ResolveError::ResolveFailed(x, (loc, env.clone())));
-                    }
-                }
-                VarKind::Idx(i) => ExprF::Var { idx: i },
-            },
-            ExprF::App { func, arg } => ExprF::App {
-                func: Box::new(go(*func, env, push_new(loc.clone(), 0))?),
-                arg: Box::new(go(*arg, env, push_new(loc.clone(), 1))?),
-            },
-            ExprF::Lambda {
-                name,
-                param_ty,
-                body,
-            } => {
-                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0))?);
-                env.push(name);
-                let res = ExprF::Lambda {
-                    name: (),
-                    param_ty,
-                    body: Box::new(go(*body, env, push_new(loc.clone(), 1))?),
-                };
-                env.pop();
-                res
-            }
-            ExprF::Pi {
-                name,
-                param_ty,
-                ret_ty,
-            } => {
-                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0))?);
-                env.push(name);
-                let res = ExprF::Pi {
-                    name: (),
-                    param_ty,
-                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc, 1))?),
-                };
-                env.pop();
-                res
-            }
-            ExprF::Type => ExprF::Type,
-        };
-        Ok(GExpr(expr))
-    }
-    go(expr, &mut Vec::new(), Vec::new())
-}

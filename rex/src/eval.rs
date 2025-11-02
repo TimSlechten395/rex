@@ -1,6 +1,4 @@
-use rex_core::{Expr, ExprF, GExpr};
-
-use crate::sea_nodes::{ExprId, SeaOfNodes};
+use crate::data::expr::{Expr, ExprF, GExpr};
 
 // what is cutoff?
 fn shift(expr: Expr, delta: isize, cutoff: usize) -> Expr {

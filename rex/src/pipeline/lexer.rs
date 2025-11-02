@@ -3,7 +3,7 @@ use std::str::FromStr;
 use chumsky::{prelude::*, text::*};
 use num_bigint::BigUint;
 
-use crate::lexer::{AbsoluteIndent, ErrorToken, ExpectedToken, InertToken, Spanned, Token};
+use crate::data::tokens::{AbsoluteIndent, ErrorToken, ExpectedToken, InertToken, Spanned, Token};
 
 fn number_parser<'a>() -> impl Parser<'a, &'a str, BigUint, extra::Err<Rich<'a, char>>> {
     text::digits(10)

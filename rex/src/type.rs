@@ -3,9 +3,9 @@ use rex_core::{Expr, ExprF, GExpr};
 use thiserror::Error;
 
 use crate::{
+    cache::{ExprId, SeaOfNodes},
     eval::weak_head_normal_form,
-    push_new,
-    sea_nodes::{ExprId, SeaOfNodes},
+    helper::push_new,
 };
 
 #[derive(Debug, Error)]
