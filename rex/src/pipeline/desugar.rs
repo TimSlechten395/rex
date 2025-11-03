@@ -1,8 +1,23 @@
 
-use functor_derive::Functor;
 use num_bigint::BigUint;
 
-use crate::{data::{ast::{LitKind, NormalSugarExpr, SugarExpr}, expr::{ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr, VarKind}}, helper::push_new};
+use crate::{data::{ast::{Ast, FixAst, LitKind}, expr::{ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr, VarKind}}, helper::push_new, Compile};
+
+pub struct Desugar;
+
+impl Compile for Desugar {
+
+
+    type Input = FixAst;
+
+    type Output = SpannedNamedExpr;
+
+    type Error = ExprError<Spanned<FixAst>>;
+
+    fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
+        desugar(input, Vec::new())
+    }
+}
 
 // (R : Type) => (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) => f x y z
 // pub fn create_church_accessors(expr: NamedExpr, field_name: String) -> Option<NamedExpr> {
@@ -124,10 +139,10 @@ pub fn iter_with_loc<T: Clone>(items: Vec<T>, loc: Vec<usize>) -> impl DoubleEnd
 }
 
 pub fn extract_binder(
-    expr: NormalSugarExpr,
+    expr: FixAst,
     loc: Vec<usize>,
-) -> Result<FullBinder, ExprError<Spanned<NormalSugarExpr>>> {
-    use SugarExpr::*;
+) -> Result<FullBinder, ExprError<Spanned<FixAst>>> {
+    use Ast::*;
     match expr.0 {
         Group(inner) => extract_binder(*inner, push_new(loc, 0)),
         Var(x) => Ok((((x, loc.clone())), Vec::new())),
@@ -159,11 +174,11 @@ pub fn extract_binder(
 
 
 pub fn extract_binding(
-    expr: NormalSugarExpr,
+    expr: FixAst,
     loc: Vec<usize>,
     is_lambda: bool,
-) -> Result<TypedBinding, ExprError<Spanned<NormalSugarExpr>>> {
-    use SugarExpr::*;
+) -> Result<TypedBinding, ExprError<Spanned<FixAst>>> {
+    use Ast::*;
     let binding = match expr.0 {
         // first item is name second is val
         Group(inner) => extract_binding(*inner, push_new(loc.clone(), 0), is_lambda)?,
@@ -295,13 +310,13 @@ pub fn extract_binding(
             }        }
         item => {
             if is_lambda {
-                let binder = extract_binder(NormalSugarExpr(item), loc.clone())?;
+                let binder = extract_binder(FixAst(item), loc.clone())?;
                 TypedBinding {
                     name: Some(binder.0),
                     ty: None,
                     val: None,
                 }            } else {
-                let ty = desugar(NormalSugarExpr(item), loc.clone())?;
+                let ty = desugar(FixAst(item), loc.clone())?;
                 TypedBinding {
                     name: None,
                     ty: Some(ty),
@@ -320,10 +335,10 @@ pub fn with_zero_span(x: NamedExpr) -> SpannedNamedExpr {
 // TODO: We need a system to allow for partial type annotation
 // TODO: We also need to keep the spans in the exprTree
 pub fn desugar(
-    expr: NormalSugarExpr,
+    expr: FixAst,
     loc: Vec<usize>,
-) -> Result<SpannedNamedExpr, ExprError<Spanned<NormalSugarExpr>>> {
-    use SugarExpr::*;
+) -> Result<SpannedNamedExpr, ExprError<Spanned<FixAst>>> {
+    use Ast::*;
     let new_expr = match expr.0 {
         Var(name) => ExprF::Var {
             idx: VarKind::Named(name),
@@ -530,9 +545,9 @@ pub fn desugar(
 
 // (R : Type) => (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) => f x y z
 pub fn create_tuple(
-    items: Vec<NormalSugarExpr>,
+    items: Vec<FixAst>,
     loc: Vec<usize>,
-) -> Result<SpannedNamedExpr, ExprError<Spanned<NormalSugarExpr>>> {
+) -> Result<SpannedNamedExpr, ExprError<Spanned<FixAst>>> {
     let items_len = items.len();
     // the f in the function body
     let f_var = SpannedExpr((
@@ -613,9 +628,9 @@ pub fn create_tuple(
 
 // (R : Type) -> (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) -> R
 pub fn create_sigma(
-    items: Vec<NormalSugarExpr>,
+    items: Vec<FixAst>,
     loc: Vec<usize>,
-) -> Result<SpannedNamedExpr, ExprError<Spanned<NormalSugarExpr>>> {
+) -> Result<SpannedNamedExpr, ExprError<Spanned<FixAst>>> {
     // the R as the return type of f
     let r_type = SpannedExpr((
         ExprF::Var {

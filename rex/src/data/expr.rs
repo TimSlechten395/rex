@@ -5,6 +5,8 @@ use anyhow::bail;
 use functor_derive::Functor;
 use thiserror::Error;
 
+use crate::Traverse;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
 pub enum ExprF<T, A, B> {
     Var { idx: A },
@@ -97,50 +99,38 @@ impl Display for VarKind<String, usize> {
 
 pub type NamedExpr = GExpr<VarKind<String, usize>, VarKind<String, ()>>;
 
-pub trait DesugarWithNames {
-    fn desugar_with_names(&self) -> NamedExpr;
-}
-
-pub trait Desugar {
-    fn desugar(&self) -> Expr;
-}
-
-impl<A, B> GExpr<A, B> {
-    pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
-        let current = path.pop();
+impl<A, B> Traverse for GExpr<A, B> {
+    type Span = Vec<usize>;
+    fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
+        let mut path = path.into_iter();
+        let current = path.next();
         match current {
             Some(cur) => match self.0 {
                 ExprF::Var { .. } => {
                     bail!("invalid path")
                 }
                 ExprF::App { func, arg } => match cur {
-                    0 => func.traverse(path),
-                    1 => arg.traverse(path),
+                    0 => func.traverse(path.collect()),
+                    1 => arg.traverse(path.collect()),
                     _ => bail!("invalid path"),
                 },
                 ExprF::Lambda { param_ty, body, .. } => match cur {
-                    0 => param_ty.traverse(path),
-                    1 => body.traverse(path),
+                    0 => param_ty.traverse(path.collect()),
+                    1 => body.traverse(path.collect()),
                     _ => bail!("invalid path"),
                 },
                 ExprF::Pi {
                     param_ty, ret_ty, ..
                 } => match cur {
-                    0 => param_ty.traverse(path),
-                    1 => ret_ty.traverse(path),
+                    0 => param_ty.traverse(path.collect()),
+                    1 => ret_ty.traverse(path.collect()),
                     _ => bail!("invalid path"),
                 },
                 ExprF::Type => bail!("invalid path"),
             },
 
-            None => Ok(self),
+            None => Ok(Box::new(self)),
         }
-    }
-
-    pub fn cata<R>(self, alg: impl Fn(ExprF<R, A, B>) -> R + Clone) -> R {
-        let term = self.0;
-        let mapped = term.fmap(|subterm| subterm.cata(alg.clone()));
-        alg(mapped)
     }
 }
 
@@ -206,5 +196,40 @@ impl<A, B> SpannedExpr<A, B> {
     pub fn remove_span(self) -> GExpr<A, B> {
         let expr = self.0.0.fmap(|e| Box::new(e.remove_span()));
         GExpr(expr)
+    }
+}
+
+impl<A, B> Traverse for SpannedExpr<A, B> {
+    type Span = Vec<usize>;
+    fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
+        let mut path = path.into_iter();
+        let current = path.next();
+        match current {
+            Some(cur) => match self.0.0 {
+                ExprF::Var { .. } => {
+                    bail!("invalid path")
+                }
+                ExprF::App { func, arg } => match cur {
+                    0 => func.traverse(path.collect()),
+                    1 => arg.traverse(path.collect()),
+                    _ => bail!("invalid path"),
+                },
+                ExprF::Lambda { param_ty, body, .. } => match cur {
+                    0 => param_ty.traverse(path.collect()),
+                    1 => body.traverse(path.collect()),
+                    _ => bail!("invalid path"),
+                },
+                ExprF::Pi {
+                    param_ty, ret_ty, ..
+                } => match cur {
+                    0 => param_ty.traverse(path.collect()),
+                    1 => ret_ty.traverse(path.collect()),
+                    _ => bail!("invalid path"),
+                },
+                ExprF::Type => bail!("invalid path"),
+            },
+
+            None => Ok(Box::new(self)),
+        }
     }
 }

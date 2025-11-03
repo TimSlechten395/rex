@@ -1,9 +1,24 @@
 use functor_derive::Functor;
 
 use crate::{
+    Compile,
     data::expr::{Expr, ExprF, GExpr, NamedExpr, VarKind},
     helper::push_new,
 };
+
+pub struct NameResolver;
+
+impl Compile for NameResolver {
+    type Input = NamedExpr;
+
+    type Output = Expr;
+
+    type Error = ResolveError<(Vec<usize>, Context)>;
+
+    fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
+        to_indices(input)
+    }
+}
 
 pub type Context = Vec<VarKind<String, ()>>;
 

@@ -1,12 +1,10 @@
 use std::fmt::Display;
 use std::ops::Range;
-use std::str::FromStr;
 
 use anyhow::anyhow;
-use chumsky::prelude::*;
 use chumsky::span::SimpleSpan;
-use chumsky::text::{digits, ident, newline, whitespace};
 use num_bigint::BigUint;
+use thiserror::Error;
 
 pub type Spanned<T> = (T, SimpleSpan);
 
@@ -44,6 +42,7 @@ impl Token<RelativeIndent> {
             Token::LBracket => Token::LBracket,
             Token::RBracket => Token::RBracket,
             Token::Type => Token::Type,
+            Token::Mod => Token::Type,
             Token::Eq => Token::Eq,
             Token::Assign => Token::Assign,
 
@@ -67,9 +66,12 @@ pub enum RelativeIndent {
 pub struct AbsoluteIndent(pub usize);
 
 // TODO: misplacedTabs does not belong here since its part of the second step
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum ErrorToken {
+    #[error("invalid char {0:?}")]
     InvalidChar(char),
+
+    #[error("misplaced tabs {0:?}")]
     MisplacedTabs(usize),
 }
 
@@ -118,6 +120,7 @@ pub enum Token<Indent> {
     Break,
     Let,
     In,
+    Mod,
 }
 
 pub fn extract_good_toks<T>(
@@ -157,6 +160,7 @@ impl Display for Token<AbsoluteIndent> {
             Token::RBracket => write!(f, "]"),
 
             Token::Type => write!(f, "Type"),
+            Token::Mod => write!(f, "Mod"),
 
             Token::Eq => write!(f, "="),
             Token::Assign => write!(f, "="),
@@ -175,19 +179,16 @@ impl Display for Token<AbsoluteIndent> {
     }
 }
 
-// maps span from Vec<Token> to Vec<Result<Token>>
+// maps span from Token to ExpectedToken
 pub fn tok_span_to_result_tok_span(
     span: Range<usize>,
-    full_tokens: &[(
-        Result<ExpectedToken<AbsoluteIndent>, ErrorToken>,
-        Range<usize>,
-    )],
+    full_tokens: &[Spanned<ExpectedToken<AbsoluteIndent>>],
 ) -> anyhow::Result<Range<usize>> {
     let mut ok_count = 0;
     let mut start_idx = None;
     let mut end_idx = None;
     for (i, t) in full_tokens.iter().enumerate() {
-        if matches!(t.0, Ok(ExpectedToken::Token(_))) {
+        if matches!(t.0, ExpectedToken::Token(_)) {
             if ok_count == span.start {
                 start_idx = Some(i)
             }
@@ -207,10 +208,7 @@ pub fn tok_span_to_result_tok_span(
 
 pub fn result_tok_span_to_char_span(
     span: Range<usize>,
-    toks: &[(
-        Result<ExpectedToken<AbsoluteIndent>, ErrorToken>,
-        Range<usize>,
-    )],
+    toks: &[Spanned<ExpectedToken<AbsoluteIndent>>],
 ) -> anyhow::Result<Range<usize>> {
     // our range is inclusive but chumsky span is exclusive
     let start = toks

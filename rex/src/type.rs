@@ -1,9 +1,9 @@
 use functor_derive::Functor;
-use rex_core::{Expr, ExprF, GExpr};
 use thiserror::Error;
 
 use crate::{
     cache::{ExprId, SeaOfNodes},
+    data::expr::{Expr, ExprF, GExpr},
     eval::weak_head_normal_form,
     helper::push_new,
 };

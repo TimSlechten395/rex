@@ -2,16 +2,15 @@ use anyhow::{Context as _, anyhow, bail};
 use std::fs::read_to_string;
 use std::ops::Range;
 
-use chumsky::Parser;
-
-use crate::data::ast::{get_normal_expr, remove_span};
 use crate::data::expr::{Expr, ExprError, ExprF, GExpr, remove_span_expr};
 use crate::data::tokens::{
     ExpectedToken, result_tok_span_to_char_span, tok_span_to_result_tok_span,
 };
-use crate::pipeline::desugar::desugar;
-use crate::pipeline::name_resolver::{ResolveError, to_indices};
-use crate::pipeline::{lexer::lexer, parser::parse};
+use crate::pipeline::desugar::Desugar;
+use crate::pipeline::lexer::Lexer;
+
+use crate::pipeline::name_resolver::{NameResolver, ResolveError};
+use crate::pipeline::parser::Parser;
 use crate::r#type::infer_type;
 
 pub mod data;
@@ -38,32 +37,24 @@ pub type Spanned<T, S> = (T, S);
 
 // here we get the wrong error
 pub trait Compile {
+    type Input;
     type Output;
     type Error;
-    type Span;
 
-    fn run(self) -> Result<Spanned<Self::Output, Self::Span>, Self::Error>;
+    fn run(input: Self::Input) -> Result<Self::Output, Self::Error>;
 }
 
 pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
     let path = path;
     let file = read_to_string(path)?;
 
-    let lexer = lexer();
-
-    let toks = lexer
-        .parse(&file)
-        .into_result()
-        .map_err(|e| anyhow!("failed to parse file: {:?}", e))?
-        .into_iter()
-        .map(|(tok, s)| (tok, s.into_range()))
-        .collect::<Vec<_>>();
+    let toks = Lexer::run(file.clone())?;
 
     let good_toks = toks
         .clone()
         .into_iter()
         .filter_map(|x| {
-            if let Ok(ExpectedToken::Token(token)) = x.0 {
+            if let ExpectedToken::Token(token) = x.0 {
                 Some(token)
             } else {
                 None
@@ -71,18 +62,16 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
         })
         .collect();
 
-    let spanned_result_sugar_expr = parse(good_toks, self_rec);
+    let spanned_ast = Parser::run(good_toks)?;
 
-    let sugar_expr = get_normal_expr(remove_span(spanned_result_sugar_expr.clone()))?;
+    let ast = spanned_ast.clone().remove_span();
 
-    let spanned_named_expr = desugar(sugar_expr, Vec::new()).map_err(|err| {
+    let spanned_named_expr = Desugar::run(ast).map_err(|err| {
         let err: ExprError<Result<_, anyhow::Error>> = err.fmap(|x| {
             let span = x.1;
 
             let node = anyhow::Context::context(
-                spanned_result_sugar_expr
-                    .clone()
-                    .traverse(span.clone().into_iter()),
+                spanned_ast.clone().traverse(span.clone()),
                 format!("span: {span:?}"),
             )?;
             let span = node.0.1;
@@ -97,7 +86,7 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
 
     let named_expr = remove_span_expr(spanned_named_expr.clone());
 
-    let tree = match to_indices(named_expr.clone()) {
+    let tree = match NameResolver::run(named_expr.clone()) {
         Ok(tree) => tree,
         Err(err) => {
             let err: ResolveError<Result<_, anyhow::Error>> = err.fmap(|x| {
@@ -105,16 +94,16 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
 
                 let span = spanned_named_expr
                     .clone()
-                    .traverse(span.clone().into_iter())
+                    .traverse(span.clone())
                     .context(anyhow!(
                         "failed to resolve path in named_expr. path: {span:?}"
                     ))?
                     .0
                     .1;
 
-                let span = spanned_result_sugar_expr
+                let span = spanned_ast
                     .clone()
-                    .traverse(span.clone().into_iter())
+                    .traverse(span.clone())
                     .context(anyhow!(
                         "failed to resolve path in sugar_expr. path: {span:?}"
                     ))?
@@ -176,33 +165,33 @@ pub fn char_index_to_line_offset(s: &str, index: usize) -> anyhow::Result<(usize
     )
 }
 
-fn format_parentheses(input: &str) -> String {
-    let mut result = String::new();
-    let mut indent_level = 0;
-
-    for c in input.chars() {
-        match c {
-            '(' => {
-                if !result.ends_with('\n') {
-                    result.push('\n');
-                }
-                result.push_str(&"  ".repeat(indent_level)); // indent
-                result.push('(');
-                indent_level += 1;
-            }
-            ')' => {
-                indent_level -= 1;
-                if !result.ends_with('\n') {
-                    result.push('\n');
-                }
-                result.push_str(&"  ".repeat(indent_level));
-                result.push(')');
-            }
-            _ => {
-                result.push(c);
-            }
-        }
-    }
-
-    result
-}
+// fn format_parentheses(input: &str) -> String {
+//     let mut result = String::new();
+//     let mut indent_level = 0;
+//
+//     for c in input.chars() {
+//         match c {
+//             '(' => {
+//                 if !result.ends_with('\n') {
+//                     result.push('\n');
+//                 }
+//                 result.push_str(&"  ".repeat(indent_level)); // indent
+//                 result.push('(');
+//                 indent_level += 1;
+//             }
+//             ')' => {
+//                 indent_level -= 1;
+//                 if !result.ends_with('\n') {
+//                     result.push('\n');
+//                 }
+//                 result.push_str(&"  ".repeat(indent_level));
+//                 result.push(')');
+//             }
+//             _ => {
+//                 result.push(c);
+//             }
+//         }
+//     }
+//
+//     result
+// }

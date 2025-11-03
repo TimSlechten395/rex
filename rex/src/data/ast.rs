@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Range;
@@ -9,6 +10,7 @@ use num_bigint::BigUint;
 use std::fmt;
 use thiserror::Error;
 
+use crate::Traverse;
 use crate::data::tokens::AbsoluteIndent;
 use crate::data::tokens::Token;
 
@@ -16,7 +18,7 @@ use crate::data::tokens::Token;
 
 // TODO: Is this even worth it to have?
 #[derive(Debug, Clone, PartialEq, Functor)]
-pub enum SugarExpr<T> {
+pub enum Ast<T> {
     Var(String),
     App(Vec<T>), // Function application
     Type,        // Type of all types
@@ -53,9 +55,9 @@ pub enum SugarExpr<T> {
     Pipe(Vec<T>),
 }
 
-impl<T: Display> Display for SugarExpr<T> {
+impl<T: Display> Display for Ast<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        use SugarExpr::*;
+        use Ast::*;
 
         match self {
             Var(name) => write!(f, "{name}"),
@@ -114,22 +116,22 @@ impl Display for LitKind {
     }
 }
 
-impl<T: Clone> SugarExpr<T> {
+impl<T: Clone> Ast<T> {
     pub fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
         match &self {
-            SugarExpr::Unit | SugarExpr::Var(_) | SugarExpr::Type | SugarExpr::Lit(_) => init,
-            SugarExpr::Group(a) => f(init, *a.clone()),
-            SugarExpr::App(items)
-            | SugarExpr::Dot(items)
-            | SugarExpr::Lambda(items)
-            | SugarExpr::Pi(items)
-            | SugarExpr::Binding(items)
-            | SugarExpr::Ann(items)
-            | SugarExpr::Tuple(items)
-            | SugarExpr::Sigma(items)
-            | SugarExpr::Pipe(items) => items.clone().into_iter().fold(init, f.clone()),
+            Ast::Unit | Ast::Var(_) | Ast::Type | Ast::Lit(_) => init,
+            Ast::Group(a) => f(init, *a.clone()),
+            Ast::App(items)
+            | Ast::Dot(items)
+            | Ast::Lambda(items)
+            | Ast::Pi(items)
+            | Ast::Binding(items)
+            | Ast::Ann(items)
+            | Ast::Tuple(items)
+            | Ast::Sigma(items)
+            | Ast::Pipe(items) => items.clone().into_iter().fold(init, f.clone()),
 
-            SugarExpr::Module(items1, items2, ..) => items2
+            Ast::Module(items1, items2, ..) => items2
                 .clone()
                 .into_iter()
                 .fold(items1.clone().into_iter().fold(init, f.clone()), f.clone()),
@@ -138,7 +140,7 @@ impl<T: Clone> SugarExpr<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Functor, Error)]
-pub enum SugarExprError<T> {
+pub enum AstError<T> {
     #[error("Invalid expression: found tokens {0:?}")]
     InvalidExpr(Vec<Token<AbsoluteIndent>>),
 
@@ -149,40 +151,19 @@ pub enum SugarExprError<T> {
     InvalidToken(Token<AbsoluteIndent>),
 }
 
-impl<T: Clone> SugarExprError<T> {
+impl<T: Clone> AstError<T> {
     pub fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
         match &self {
-            SugarExprError::InvalidExpr(_) | SugarExprError::InvalidToken(_) => init,
-            SugarExprError::Other(a) => f(init, *a.clone()),
+            AstError::InvalidExpr(_) | AstError::InvalidToken(_) => init,
+            AstError::Other(a) => f(init, *a.clone()),
         }
     }
 }
 
-pub fn fold<T: Clone, U>(
-    expr: Result<SugarExpr<T>, SugarExprError<T>>,
-    init: U,
-    f: impl Fn(U, T) -> U + Clone,
-) -> U {
-    match expr {
-        Ok(r) => r.fold(init, f),
-        Err(e) => e.fold(init, f),
-    }
-}
-
-pub fn fmap<T, R>(
-    expr: Result<SugarExpr<T>, SugarExprError<T>>,
-    f: impl Fn(T) -> R,
-) -> Result<SugarExpr<R>, SugarExprError<R>> {
-    match expr {
-        Ok(r) => Ok(r.fmap(f)),
-        Err(e) => Err(e.fmap(f)),
-    }
-}
-
 #[derive(Debug, Clone)]
-pub struct NormalSugarExpr(pub SugarExpr<NormalSugarExpr>);
+pub struct FixAst(pub Ast<FixAst>);
 
-impl Display for NormalSugarExpr {
+impl Display for FixAst {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Delegate to the inner SugarExpr's Display implementation
         write!(f, "{}", self.0)
@@ -190,25 +171,27 @@ impl Display for NormalSugarExpr {
 }
 
 #[derive(Debug, Clone)]
-pub struct SpannedNormalSugarExpr(pub Spanned<SugarExpr<NormalSugarExpr>>);
+pub struct SpannedFixAst(pub Spanned<Ast<SpannedFixAst>>);
 
-impl NormalSugarExpr {
-    pub fn traverse(self, mut path: Vec<usize>) -> anyhow::Result<Self> {
-        let current = path.pop();
+impl Traverse for SpannedFixAst {
+    type Span = Vec<usize>;
+    fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
+        let mut path = path.into_iter();
+        let current = path.next();
 
-        use SugarExpr::*;
+        use Ast::*;
         match current {
-            Some(cur) => match self.0 {
+            Some(cur) => match self.0.0 {
                 Unit | Var(_) | Type | Lit(_) => bail!("invalid path"),
                 Group(e) => match cur {
-                    0 => e.traverse(path),
+                    0 => e.traverse(path.collect()),
                     _ => bail!("invalid path"),
                 },
 
                 Tuple(items) | Sigma(items) | App(items) | Ann(items) | Binding(items)
                 | Lambda(items) | Pi(items) | Pipe(items) | Dot(items) => {
                     if let Some(param) = items.get(cur) {
-                        param.clone().traverse(path)
+                        param.clone().traverse(path.collect())
                     } else {
                         bail!("invalid path")
                     }
@@ -222,10 +205,10 @@ impl NormalSugarExpr {
                 Module(items1, items2, ..) => match cur {
                     0 => {
                         let cur = path
-                            .pop()
+                            .next()
                             .ok_or(anyhow!("pointed to mod deps without giving dep"))?;
                         if let Some(param) = items1.get(cur) {
-                            param.clone().traverse(path)
+                            param.clone().traverse(path.collect())
                         } else {
                             bail!(
                                 "pointed to mod dep {} but mod has only {} deps",
@@ -236,10 +219,10 @@ impl NormalSugarExpr {
                     }
                     1 => {
                         let cur = path
-                            .pop()
+                            .next()
                             .ok_or(anyhow!("pointed to mod items without giving item"))?;
                         if let Some(param) = items2.get(cur) {
-                            param.clone().traverse(path)
+                            param.clone().traverse(path.collect())
                         } else {
                             bail!(
                                 "pointed to mod item {} but mod has only {} items",
@@ -252,21 +235,19 @@ impl NormalSugarExpr {
                 },
             },
 
-            None => Ok(self),
+            None => Ok(Box::new(self)),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct ResultSugarExpr(pub Result<SugarExpr<ResultSugarExpr>, SugarExprError<ResultSugarExpr>>);
+pub struct ResultAst(pub Result<Ast<ResultAst>, AstError<ResultAst>>);
 
-pub fn get_normal_expr(
-    expr: ResultSugarExpr,
-) -> Result<NormalSugarExpr, SugarExprError<ResultSugarExpr>> {
-    match expr.0 {
+pub fn get_fix_ast(expr: SpannedResultAst) -> Result<SpannedFixAst, AstError<SpannedResultAst>> {
+    match expr.0.0 {
         Ok(sugar) => sugar
-            .try_fmap(|child| get_normal_expr(child))
-            .map(NormalSugarExpr),
+            .try_fmap(|child| get_fix_ast(child))
+            .map(|inner| SpannedFixAst((inner, expr.0.1))),
         Err(e) => Err(e),
     }
 }
@@ -293,11 +274,9 @@ pub fn get_normal_expr(
 pub type Spanned<T> = (T, Range<usize>);
 
 #[derive(Clone)]
-pub struct SpannedResultSugarExpr(
-    pub Spanned<Result<SugarExpr<SpannedResultSugarExpr>, SugarExprError<SpannedResultSugarExpr>>>,
-);
+pub struct SpannedResultAst(pub Spanned<Result<Ast<SpannedResultAst>, AstError<SpannedResultAst>>>);
 
-impl fmt::Debug for SpannedResultSugarExpr {
+impl fmt::Debug for SpannedResultAst {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (inner, span) = &self.0;
         match inner {
@@ -307,112 +286,59 @@ impl fmt::Debug for SpannedResultSugarExpr {
     }
 }
 
-impl SpannedResultSugarExpr {
-    //some of the worst code I have ever written
-    // pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
-    //     use SugarExpr::*;
-    //     let range = self.0.1;
-    //     if range.contains(&token_index) {
-    //         match self.0.0.clone() {
-    //             Ok(node) => match node {
-    //                 SugarExpr::Group(a) => a
-    //                     .search(token_index)
-    //                     .map(|mut x| {
-    //                         x.push(0);
-    //                         x
-    //                     })
-    //                     .or(Some(Vec::new())),
-    //                 SugarExpr::Sigma(items) => items
-    //                     .into_iter()
-    //                     .enumerate()
-    //                     .fold(None, |acc, (i, item)| {
-    //                         if acc.is_none() {
-    //                             item.search(token_index).map(|mut x| {
-    //                                 x.push(i);
-    //                                 x
-    //                             })
-    //                         } else {
-    //                             acc
-    //                         }
-    //                     })
-    //                     .or(Some(Vec::new())),
-    //             },
-    //
-    //             Err(node) => match node {
-    //                 FailedLet(a) => a
-    //                     .search(token_index)
-    //                     .map(|mut x| {
-    //                         x.push(0);
-    //                         x
-    //                     })
-    //                     .or(Some(Vec::new())),
-    //                 ExprError::Other(a) => a.search(token_index).map(|mut x| {
-    //                     x.push(0);
-    //                     x
-    //                 }),
-    //                 _ => Some(Vec::new()),
-    //             },
-    //         }
-    //     } else {
-    //         None
-    //     }
-    // }
-    //
-    pub fn traverse(
-        self,
-        mut path: impl Iterator<Item = usize> + std::fmt::Debug,
-    ) -> anyhow::Result<Self> {
-        use SugarExpr::*;
-        let ok = self
-            .clone()
-            .0
-            .0
-            .map_err(|_e| anyhow!("invalid syntax tree"))?;
-        let current = path.next();
-
-        let err = anyhow!("invalid path: at: {ok:?}, current: {current:?}, still left: {path:?}");
-        let err2 = anyhow!("invalid path: stuck at: {ok:?}, current: {current:?}, no path left");
-
-        match current {
-            Some(cur) => match ok {
-                Var(_) | Lit(_) | Type | Unit => Err(err),
-                SugarExpr::App(items)
-                | SugarExpr::Lambda(items)
-                | SugarExpr::Pi(items)
-                | SugarExpr::Tuple(items)
-                | SugarExpr::Ann(items)
-                | SugarExpr::Binding(items)
-                | SugarExpr::Pipe(items)
-                | SugarExpr::Sigma(items)
-                | SugarExpr::Dot(items) => {
-                    let item = items.get(cur).ok_or(err)?;
-                    item.clone().traverse(path)
-                }
-                SugarExpr::Group(e) => match cur {
-                    0 => e.traverse(path),
-                    _ => Err(err),
-                },
-                SugarExpr::Module(items1, items2, ..) => match cur {
-                    0 => {
-                        let cur = path.next().ok_or(err2)?;
-                        let param = items1.get(cur).ok_or(err)?;
-                        param.clone().traverse(path)
-                    }
-                    1 => {
-                        let cur = path.next().ok_or(err2)?;
-                        let param = items2.get(cur).ok_or(err)?;
-                        param.clone().traverse(path)
-                    }
-                    _ => Err(err),
-                },
-            },
-
-            None => Ok(self),
-        }
+//some of the worst code I have ever written
+// pub fn search(self, token_index: usize) -> Option<Vec<usize>> {
+//     use SugarExpr::*;
+//     let range = self.0.1;
+//     if range.contains(&token_index) {
+//         match self.0.0.clone() {
+//             Ok(node) => match node {
+//                 SugarExpr::Group(a) => a
+//                     .search(token_index)
+//                     .map(|mut x| {
+//                         x.push(0);
+//                         x
+//                     })
+//                     .or(Some(Vec::new())),
+//                 SugarExpr::Sigma(items) => items
+//                     .into_iter()
+//                     .enumerate()
+//                     .fold(None, |acc, (i, item)| {
+//                         if acc.is_none() {
+//                             item.search(token_index).map(|mut x| {
+//                                 x.push(i);
+//                                 x
+//                             })
+//                         } else {
+//                             acc
+//                         }
+//                     })
+//                     .or(Some(Vec::new())),
+//             },
+//
+//             Err(node) => match node {
+//                 FailedLet(a) => a
+//                     .search(token_index)
+//                     .map(|mut x| {
+//                         x.push(0);
+//                         x
+//                     })
+//                     .or(Some(Vec::new())),
+//                 ExprError::Other(a) => a.search(token_index).map(|mut x| {
+//                     x.push(0);
+//                     x
+//                 }),
+//                 _ => Some(Vec::new()),
+//             },
+//         }
+//     } else {
+//         None
+//     }
+// }
+//
+impl SpannedFixAst {
+    pub fn remove_span(self) -> FixAst {
+        let inner = self.0.0.fmap(|inner| inner.remove_span());
+        FixAst(inner)
     }
-}
-
-pub fn remove_span(expr: SpannedResultSugarExpr) -> ResultSugarExpr {
-    let inner = fmap(expr.0.0, |inner| remove_span(inner));
-    ResultSugarExpr(inner)
 }

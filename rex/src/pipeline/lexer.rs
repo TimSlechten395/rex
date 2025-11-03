@@ -3,7 +3,48 @@ use std::str::FromStr;
 use chumsky::{prelude::*, text::*};
 use num_bigint::BigUint;
 
-use crate::data::tokens::{AbsoluteIndent, ErrorToken, ExpectedToken, InertToken, Spanned, Token};
+use crate::{
+    Compile,
+    data::tokens::{AbsoluteIndent, ErrorToken, ExpectedToken, InertToken, Spanned, Token},
+};
+
+pub struct Lexer;
+
+impl Compile for Lexer {
+    type Input = String;
+
+    type Output = Vec<Spanned<ExpectedToken<AbsoluteIndent>>>;
+
+    type Error = ErrorToken;
+
+    fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
+        collect_results(
+            lexer()
+                .parse(&input)
+                .into_result()
+                .unwrap()
+                .into_iter()
+                .map(|spanned| match spanned.0 {
+                    Ok(val) => Ok((val, spanned.1)),
+                    Err(e) => Err(e),
+                })
+                .collect(),
+        )
+    }
+}
+
+pub fn collect_results<A, E>(v: Vec<Result<A, E>>) -> Result<Vec<A>, E> {
+    let mut res = Vec::with_capacity(v.len());
+
+    for r in v {
+        match r {
+            Ok(a) => res.push(a),
+            Err(e) => return Err(e), // return immediately on first error
+        }
+    }
+
+    Ok(res)
+}
 
 fn number_parser<'a>() -> impl Parser<'a, &'a str, BigUint, extra::Err<Rich<'a, char>>> {
     text::digits(10)
@@ -28,11 +69,12 @@ fn number_parser<'a>() -> impl Parser<'a, &'a str, BigUint, extra::Err<Rich<'a, 
     //     .boxed()
 }
 
-fn count_indent(line: &str) -> usize {
-    line.chars().take_while(|c| *c == ' ' || *c == '\t').count()
-}
+// fn count_indent(line: &str) -> usize {
+//     line.chars().take_while(|c| *c == ' ' || *c == '\t').count()
+// }
+//
 
-pub fn lexer<'a>() -> impl Parser<
+fn lexer<'a>() -> impl Parser<
     'a,
     &'a str,
     Vec<Spanned<Result<ExpectedToken<AbsoluteIndent>, ErrorToken>>>,
@@ -75,6 +117,7 @@ pub fn lexer<'a>() -> impl Parser<
         // "Pair" => Token::Pair,
         "def" => Token::Def,
         "Type" => Token::Type,
+        "Mod" => Token::Mod,
         // "just" => Token::Just,
         "loop" => Token::Loop,
         "while" => Token::While,

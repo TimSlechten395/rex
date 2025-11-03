@@ -1,5 +1,7 @@
 // Types use ... -> ... and functions use ... => ...both are right associative
 
+Mod
+
 // Unit (Top/True)
 def unit (A: Type) (x: A) : A := x
 

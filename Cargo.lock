@@ -723,16 +723,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rex-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "either",
- "functor_derive",
- "thiserror",
-]
-
-[[package]]
 name = "rex-lsp"
 version = "0.1.0"
 dependencies = [
@@ -743,20 +733,6 @@ dependencies = [
  "ropey",
  "tokio",
  "tower-lsp-server",
-]
-
-[[package]]
-name = "rex-parser"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chumsky",
- "either",
- "functor_derive",
- "num-bigint",
- "rex-core",
- "smallvec",
- "thiserror",
 ]
 
 [[package]]
