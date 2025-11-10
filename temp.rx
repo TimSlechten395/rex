@@ -1,2 +1,7 @@
+
 def Nat: Type := (A: Type) -> (A -> A) -> A -> A
-def five: Nat := 5
+
+def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
+
+def succ: Nat -> Nat := (n: (A: Type) -> (A -> A) -> A -> A) => (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+def two: Nat := succ zero

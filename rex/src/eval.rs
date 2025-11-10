@@ -1,13 +1,13 @@
 use crate::data::expr::{Expr, ExprF, GExpr};
 
-// what is cutoff?
-fn shift(expr: Expr, delta: isize, cutoff: usize) -> Expr {
+// if you beta reduce under a lambda the free variables need to be shifted accordingly
+pub fn shift(expr: Expr, delta: isize, cutoff: usize) -> Expr {
     let expr = match expr.0.clone() {
         ExprF::Var { idx } => {
             if idx >= cutoff {
                 // k + d
                 let k_i = idx as isize + delta;
-                assert!(k_i >= 0, "shift resulted in negative index");
+                assert!(k_i >= 0, "shift resulted in negative index {k_i:?}");
                 ExprF::Var { idx: k_i as usize }
             } else {
                 ExprF::Var { idx }
@@ -44,20 +44,21 @@ fn shift(expr: Expr, delta: isize, cutoff: usize) -> Expr {
 }
 
 // do we need the index here?
-fn substitute(index: usize, func: Expr, arg: Expr) -> Expr {
-    let expr = match func.0 {
+pub fn subst(index: usize, body: Expr, arg: Expr) -> Expr {
+    let expr = match body.0 {
         ExprF::Var { idx } => {
             if idx == index {
                 arg.0
             } else {
-                func.0
+                body.0
             }
         }
         //
         ExprF::Lambda { param_ty, body, .. } => {
             // The only important part of this function
+            let param_ty = Box::new(subst(index, *param_ty, arg.clone()));
             let arg_shifted = shift(arg, 1, 0);
-            let body = Box::new(substitute(index + 1, *body, arg_shifted));
+            let body = Box::new(subst(index + 1, *body, arg_shifted));
             ExprF::Lambda {
                 name: (),
                 param_ty,
@@ -69,8 +70,8 @@ fn substitute(index: usize, func: Expr, arg: Expr) -> Expr {
             func: app_func,
             arg: app_arg,
         } => {
-            let app_func = Box::new(substitute(index, *app_func, arg.clone()));
-            let app_arg = Box::new(substitute(index, *app_arg, arg));
+            let app_func = Box::new(subst(index, *app_func, arg.clone()));
+            let app_arg = Box::new(subst(index, *app_arg, arg));
             ExprF::App {
                 func: app_func,
                 arg: app_arg,
@@ -79,10 +80,10 @@ fn substitute(index: usize, func: Expr, arg: Expr) -> Expr {
         ExprF::Pi {
             param_ty, ret_ty, ..
         } => {
-            let param_ty = Box::new(substitute(index, *param_ty, arg.clone()));
+            let param_ty = Box::new(subst(index, *param_ty, arg.clone()));
 
             let arg_shifted = shift(arg, 1, 0);
-            let ret_ty = Box::new(substitute(index, *ret_ty, arg_shifted));
+            let ret_ty = Box::new(subst(index + 1, *ret_ty, arg_shifted));
 
             ExprF::Pi {
                 name: (),
@@ -95,6 +96,12 @@ fn substitute(index: usize, func: Expr, arg: Expr) -> Expr {
     GExpr(expr)
 }
 
+pub fn beta_reduce(body: Expr, arg: Expr) -> Expr {
+    let arg_shifted = shift(arg, 1, 0);
+    let substed = subst(0, body, arg_shifted);
+    shift(substed, -1, 0)
+}
+
 pub fn weak_head_normal_form(expr: Expr) -> Expr {
     match expr.0 {
         ExprF::App { func, arg } => {
@@ -102,7 +109,7 @@ pub fn weak_head_normal_form(expr: Expr) -> Expr {
 
             match func_eval.0 {
                 ExprF::Lambda { body, .. } => {
-                    let result = substitute(0, *body, *arg);
+                    let result = beta_reduce(*body, *arg);
                     weak_head_normal_form(result)
                 }
                 _ => GExpr(ExprF::App {
@@ -142,7 +149,7 @@ pub fn head_normal_form(expr: Expr) -> Expr {
 
             match func_eval.0 {
                 ExprF::Lambda { body, .. } => {
-                    let result = substitute(0, *body, *arg);
+                    let result = beta_reduce(*body, *arg);
                     head_normal_form(result)
                 }
                 _ => GExpr(ExprF::App {
@@ -180,7 +187,7 @@ pub fn normal_form(expr: Expr) -> Expr {
         ExprF::App { func, arg } => {
             let func = normal_form(*func);
             match func.0 {
-                ExprF::Lambda { body, .. } => normal_form(substitute(0, *body, *arg)),
+                ExprF::Lambda { body, .. } => normal_form(beta_reduce(*body, *arg)),
                 _ => GExpr(ExprF::App {
                     func: Box::new(func),
                     arg: Box::new(normal_form(*arg)),

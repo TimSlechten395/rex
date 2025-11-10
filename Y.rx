@@ -1,5 +1,3 @@
-Mod
-
-def Y_combinator (A: Type) (f: A -> A) : A :=
+Y_combinator (A: Type) (f: A -> A) : A :=
   ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))
   ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))

@@ -11,7 +11,7 @@ use crate::pipeline::lexer::Lexer;
 
 use crate::pipeline::name_resolver::{NameResolver, ResolveError};
 use crate::pipeline::parser::Parser;
-use crate::r#type::infer_type;
+use crate::r#type::{TypeError, infer_type};
 
 pub mod data;
 pub mod pipeline;
@@ -44,10 +44,7 @@ pub trait Compile {
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error>;
 }
 
-pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
-    let path = path;
-    let file = read_to_string(path)?;
-
+pub fn compile(file: String) -> anyhow::Result<Expr> {
     let toks = Lexer::run(file.clone())?;
 
     let good_toks = toks
@@ -67,9 +64,7 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
     let ast = spanned_ast.clone().remove_span();
 
     let spanned_named_expr = Desugar::run(ast).map_err(|err| {
-        let err: ExprError<Result<_, anyhow::Error>> = err.fmap(|x| {
-            let span = x.1;
-
+        let err: ExprError<Result<_, anyhow::Error>> = err.fmap(|span| {
             let node = anyhow::Context::context(
                 spanned_ast.clone().traverse(span.clone()),
                 format!("span: {span:?}"),
@@ -86,8 +81,8 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
 
     let named_expr = remove_span_expr(spanned_named_expr.clone());
 
-    let tree = match NameResolver::run(named_expr.clone()) {
-        Ok(tree) => tree,
+    let expr = match NameResolver::run(named_expr.clone()) {
+        Ok(tree) => Ok(tree),
         Err(err) => {
             let err: ResolveError<Result<_, anyhow::Error>> = err.fmap(|x| {
                 let span = x.0;
@@ -114,23 +109,58 @@ pub fn compile(path: &str, self_rec: bool) -> anyhow::Result<Expr> {
                 let span = result_tok_span_to_char_span(span.clone(), &toks)?;
                 Ok((range_to_line_offset_range(span, &file)?, x.1))
             });
-            panic!("failed to resolve at {err:?}")
+            Err(anyhow!("failed to name resolve at {err:?}"))
+        }
+    }?;
+
+    // now we get a module and need to do resolution
+    // let expr: Expr =
+    //     let ycomb = compile(
+    //         "Y_combinator (A: Type) (f: A -> A) : A :=
+    //             ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))
+    //             ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))
+    //         "
+    //         .to_string(),
+    //     )
+    //     .context("Y.rx: ")?;
+    //     GExpr(ExprF::App {
+    //         func: Box::new(ycomb),
+    //         arg: Box::new(tree),
+    //     })
+    // } else {
+    //     expr
+    // };
+
+    // TODO: fix
+    let mut ty_errors = Vec::new();
+
+    match infer_type(expr.clone(), Vec::new(), &mut ty_errors, Vec::new()) {
+        Ok(ok) => {
+            // dbg!(ok);
+        }
+        Err(err) => {
+            ty_errors.push(err);
         }
     };
 
-    // now we get a module and need to do resolution
-    let expr: Expr = if self_rec {
-        let ycomb = compile("Y.rx", false).context("Y.rx: ")?;
-        GExpr(ExprF::App {
-            func: Box::new(ycomb),
-            arg: Box::new(tree),
-        })
-    } else {
-        tree
-    };
+    let ty_errors = ty_errors.into_iter().map(|err| {
+        let err: TypeError<Result<_, anyhow::Error>> = err.fmap(|span| {
+            let span = spanned_named_expr.clone().traverse(span)?.0.1;
 
-    // TODO: fix
-    infer_type(expr.clone(), &mut Vec::new(), &mut Vec::new(), Vec::new()).map_err(|err| err)?;
+            let span = spanned_ast.clone().traverse(span.clone())?.0.1;
+
+            let span = tok_span_to_result_tok_span(span.clone(), &toks)?;
+            let span = result_tok_span_to_char_span(span.clone(), &toks)?;
+            Ok(range_to_line_offset_range(span, &file)?)
+        });
+
+        anyhow!("Type Error: {err:?}")
+    });
+
+    for err in ty_errors {
+        println!("------------");
+        println!("{:?}", err);
+    }
 
     Ok(expr)
 }

@@ -1,18 +1,22 @@
-
 use num_bigint::BigUint;
 
-use crate::{data::{ast::{Ast, FixAst, LitKind}, expr::{ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr, VarKind}}, helper::push_new, Compile};
+use crate::{
+    Compile,
+    data::{
+        ast::{Ast, FixAst, LitKind},
+        expr::{
+            ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr, VarKind,
+        },
+    },
+    helper::push_new,
+};
 
 pub struct Desugar;
 
 impl Compile for Desugar {
-
-
     type Input = FixAst;
-
     type Output = SpannedNamedExpr;
-
-    type Error = ExprError<Spanned<FixAst>>;
+    type Error = ExprError<Vec<usize>>;
 
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
         desugar(input, Vec::new())
@@ -132,22 +136,22 @@ pub struct TypedBinding {
     val: Option<SpannedNamedExpr>,
 }
 
-
-pub fn iter_with_loc<T: Clone>(items: Vec<T>, loc: Vec<usize>) -> impl DoubleEndedIterator<Item = (T, Vec<usize>)> + Clone {
-    items.into_iter().enumerate().map(move |(new_loc, expr)| (expr, push_new(loc.clone(), new_loc)))
-
+pub fn iter_with_loc<T: Clone>(
+    items: Vec<T>,
+    loc: Vec<usize>,
+) -> impl DoubleEndedIterator<Item = (T, Vec<usize>)> + Clone {
+    items
+        .into_iter()
+        .enumerate()
+        .map(move |(new_loc, expr)| (expr, push_new(loc.clone(), new_loc)))
 }
 
-pub fn extract_binder(
-    expr: FixAst,
-    loc: Vec<usize>,
-) -> Result<FullBinder, ExprError<Spanned<FixAst>>> {
+pub fn extract_binder(expr: FixAst, loc: Vec<usize>) -> Result<FullBinder, ExprError<Vec<usize>>> {
     use Ast::*;
     match expr.0 {
         Group(inner) => extract_binder(*inner, push_new(loc, 0)),
         Var(x) => Ok((((x, loc.clone())), Vec::new())),
         App(items) => {
-
             let mut items = iter_with_loc(items, loc.clone());
 
             let name = items.next().unwrap();
@@ -155,174 +159,184 @@ pub fn extract_binder(
             let name_as_str = match name.0.0 {
                 Var(name) => name,
                 _ => {
-                    return Err(ExprError::InvalidBinderName(name));
+                    return Err(ExprError::InvalidBinderName(name.1));
                 }
             };
 
             let items = items.map(|(expr, loc)| {
-                extract_binding(expr, loc.clone(), true).map(|x| (x, loc.clone()))
+                extract_binding(expr, loc.clone(), BindingPriority::NameTyVal)
+                    .map(|x| (x, loc.clone()))
             });
 
-            Ok(((name_as_str, name.1.clone()), items.collect::<Result<_,_>>()?))
+            Ok((
+                (name_as_str, name.1.clone()),
+                items.collect::<Result<_, _>>()?,
+            ))
         }
-        _ => Err(ExprError::InvalidBinder((
-            expr.clone(),
-            loc.clone(),
-        ))),
+        _ => Err(ExprError::InvalidBinder(loc.clone())),
     }
 }
 
+pub enum BindingPriority {
+    NameTyVal, // used for lambdas
+    TyNameVal, // used for pis and sigmas
+    ValNameTy, // used for tuples
+}
+
+pub fn fold_ty(
+    binder: FullBinder,
+    ty: Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>>,
+) -> Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>> {
+    binder
+        .1
+        .clone()
+        .into_iter()
+        .clone()
+        .rev()
+        .fold(ty, |acc, item| {
+            Ok(SpannedExpr((
+                ExprF::Pi {
+                    name: item
+                        .0
+                        .name
+                        .clone()
+                        .map(|x| VarKind::Named(x.0))
+                        .unwrap_or(VarKind::Idx(())),
+                    param_ty: Box::new(
+                        item.0
+                            .ty
+                            .clone()
+                            .ok_or(ExprError::InvalidBinderParam(item.1.clone()))?,
+                    ),
+                    ret_ty: Box::new(acc?),
+                },
+                item.1,
+            )))
+        })
+}
+
+pub fn fold_val(
+    binder: FullBinder,
+    ty: Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>>,
+) -> Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>> {
+    binder
+        .1
+        .clone()
+        .into_iter()
+        .clone()
+        .rev()
+        .fold(ty, |acc, item| {
+            Ok(SpannedExpr((
+                ExprF::Lambda {
+                    name: item
+                        .0
+                        .name
+                        .clone()
+                        .map(|x| VarKind::Named(x.0))
+                        .unwrap_or(VarKind::Idx(())),
+                    param_ty: Box::new(
+                        item.0
+                            .ty
+                            .clone()
+                            .ok_or(ExprError::InvalidBinderParam(item.1.clone()))?,
+                    ),
+                    body: Box::new(acc?),
+                },
+                item.1,
+            )))
+        })
+}
 
 pub fn extract_binding(
     expr: FixAst,
     loc: Vec<usize>,
-    is_lambda: bool,
-) -> Result<TypedBinding, ExprError<Spanned<FixAst>>> {
+    prior: BindingPriority,
+) -> Result<TypedBinding, ExprError<Vec<usize>>> {
     use Ast::*;
     let binding = match expr.0 {
         // first item is name second is val
-        Group(inner) => extract_binding(*inner, push_new(loc.clone(), 0), is_lambda)?,
+        Group(inner) => extract_binding(*inner, push_new(loc.clone(), 0), prior)?,
         Binding(items) => {
             let mut items = iter_with_loc(items, loc.clone());
-                
 
             let named = items.next().unwrap();
 
-            let val = items
-                .map(|(expr, loc)| desugar(expr, loc))
-                .last()
-                .unwrap();
+            let val = items.map(|(expr, loc)| desugar(expr, loc)).last().unwrap();
 
             match named.0.0 {
                 Ann(items) => {
                     let mut items = iter_with_loc(items, named.1.clone());
                     let binder_expr = items.next().unwrap();
 
-                    let ty = items
-                        .map(|(expr, i)| desugar(expr, i))
-                        .next()
-                        .unwrap();
+                    let ty = items.map(|(expr, i)| desugar(expr, i)).next().unwrap();
 
                     let binder = extract_binder(binder_expr.0.clone(), binder_expr.1.clone())?;
 
                     // converting 'succ (n : Nat) : Nat' into 'succ: (n: Nat) -> Nat'
-                    let ty = binder.1.clone().into_iter().clone().rev().fold(ty, |acc, item| {
-                        Ok(SpannedExpr((
-                            ExprF::Pi {
-                                name: item.0
-                                    .name
-                                    .clone()
-                                    .map(|x| VarKind::Named(x.0))
-                                    .unwrap_or(VarKind::Idx(())),
-                                param_ty: Box::new(item.0.ty.clone().ok_or(
-                                    ExprError::InvalidBinderParam(
-                                        binder_expr.clone()
-                                    ),
-                                )?),
-                                ret_ty: Box::new(acc?),
-                            },
-                            item.1
-                        )))
-                    })?;
-
-                    let val = binder.1.into_iter().clone().rev().fold(val, |acc, item| {
-                        Ok(SpannedExpr((
-                            ExprF::Lambda {
-                                name: item.0
-                                    .name
-                                    .clone()
-                                    .map(|x| VarKind::Named(x.0))
-                                    .unwrap_or(VarKind::Idx(())),
-                                param_ty: Box::new(item.0.ty.clone().ok_or(
-                                    ExprError::InvalidBinderParam(binder_expr.clone()),
-                                )?),
-                                body: Box::new(acc?),
-                            },
-                            item.1
-                        )))
-                    })?;
+                    let ty = fold_ty(binder.clone(), ty)?;
+                    let val = fold_val(binder.clone(), val)?;
 
                     TypedBinding {
                         name: Some(binder.0),
                         ty: Some(ty),
                         val: Some(val),
-                    }                }
+                    }
+                }
                 _ => {
                     let binder = extract_binder(named.0.clone(), named.1.clone())?;
 
-                    let val = binder.1.into_iter().clone().rev().fold(val, |acc, item| {
-                        Ok(SpannedExpr((
-                            ExprF::Lambda {
-                                name: item.0
-                                    .name
-                                    .clone()
-                                    .map(|x| VarKind::Named(x.0))
-                                    .unwrap_or(VarKind::Idx(())),
-                                param_ty: Box::new(item.0.ty.clone().ok_or(
-                                    ExprError::InvalidBinderParam(named.clone()),
-                                )?),
-                                body: Box::new(acc?),
-                            },
-                            item.1
-                        )))
-                    })?;
+                    let val = fold_val(binder.clone(), val)?;
 
                     TypedBinding {
                         name: Some(binder.0),
                         ty: None,
                         val: Some(val),
-                    }                }
+                    }
+                }
             }
         }
         Ann(items) => {
             let mut items = iter_with_loc(items, loc.clone());
             let binder_or_val = items.next().unwrap();
 
-
-            let ty = items
-                .map(|(expr, loc)| {
-                    desugar(expr, loc)
-                })
-                .next()
-                .unwrap()?;
+            let ty = items.map(|(expr, loc)| desugar(expr, loc)).next().unwrap();
 
             let binder = extract_binder(binder_or_val.0.clone(), binder_or_val.1.clone())?;
 
-            let ty = binder.1.into_iter().clone().fold(Ok(ty), |acc, item| {
-                Ok(SpannedExpr((
-                    ExprF::Pi {
-                        name: item.0
-                            .name
-                            .clone()
-                            .map(|x| VarKind::Named(x.0))
-                            .unwrap_or(VarKind::Idx(())),
-                        param_ty: Box::new(item.0.ty.clone().ok_or(ExprError::MissingType(binder_or_val.clone()))?),
-                        ret_ty: Box::new(acc?),
-                    },
-                    item.1
-                )))
-            });
+            let ty = fold_ty(binder.clone(), ty)?;
 
             TypedBinding {
                 name: Some(binder.0),
-                ty: Some(ty?),
+                ty: Some(ty),
                 val: None,
-            }        }
-        item => {
-            if is_lambda {
+            }
+        }
+        item => match prior {
+            BindingPriority::NameTyVal => {
                 let binder = extract_binder(FixAst(item), loc.clone())?;
                 TypedBinding {
                     name: Some(binder.0),
                     ty: None,
                     val: None,
-                }            } else {
+                }
+            }
+            BindingPriority::TyNameVal => {
                 let ty = desugar(FixAst(item), loc.clone())?;
                 TypedBinding {
                     name: None,
                     ty: Some(ty),
                     val: None,
-                }            }
-        }
+                }
+            }
+            BindingPriority::ValNameTy => {
+                let val = desugar(FixAst(item), loc.clone())?;
+                TypedBinding {
+                    name: None,
+                    ty: None,
+                    val: Some(val),
+                }
+            }
+        },
     };
     Ok(binding)
 }
@@ -331,13 +345,9 @@ pub fn with_zero_span(x: NamedExpr) -> SpannedNamedExpr {
     SpannedExpr((x.0.fmap(|x| Box::new(with_zero_span(*x))), Vec::new()))
 }
 
-
 // TODO: We need a system to allow for partial type annotation
 // TODO: We also need to keep the spans in the exprTree
-pub fn desugar(
-    expr: FixAst,
-    loc: Vec<usize>,
-) -> Result<SpannedNamedExpr, ExprError<Spanned<FixAst>>> {
+pub fn desugar(expr: FixAst, loc: Vec<usize>) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
     use Ast::*;
     let new_expr = match expr.0 {
         Var(name) => ExprF::Var {
@@ -361,9 +371,7 @@ pub fn desugar(
             let mut items = iter_with_loc(items, loc.clone());
             let base = items.next().unwrap();
 
-
             return items.fold(desugar(base.0, base.1), |acc, item| {
-
                 Ok(SpannedExpr((
                     ExprF::App {
                         func: Box::new(acc?),
@@ -375,13 +383,12 @@ pub fn desugar(
         }
 
         Lambda(items) => {
-
             let mut items = iter_with_loc(items, loc.clone()).rev();
             let base = items.next().unwrap();
 
             return items.fold(desugar(base.0, base.1), |acc, item| {
-
-                let binding = extract_binding(item.0.clone(), item.1.clone(), true)?;
+                let binding =
+                    extract_binding(item.0.clone(), item.1.clone(), BindingPriority::NameTyVal)?;
 
                 Ok(SpannedExpr((
                     ExprF::Lambda {
@@ -390,7 +397,9 @@ pub fn desugar(
                             .clone()
                             .map(|x| VarKind::Named(x.0))
                             .unwrap_or(VarKind::Idx(())),
-                        param_ty: Box::new(binding.ty.ok_or(ExprError::MissingType(item.clone()))?),
+                        param_ty: Box::new(
+                            binding.ty.ok_or(ExprError::MissingType(item.1.clone()))?,
+                        ),
                         body: Box::new(acc?),
                     },
                     loc.clone(),
@@ -403,8 +412,8 @@ pub fn desugar(
             let base = items.next().unwrap();
 
             return items.fold(desugar(base.0, base.1), |acc, item| {
-
-                let binding = extract_binding(item.0.clone(), item.1.clone(), false)?;
+                let binding =
+                    extract_binding(item.0.clone(), item.1.clone(), BindingPriority::TyNameVal)?;
 
                 Ok(SpannedExpr((
                     ExprF::Pi {
@@ -413,24 +422,26 @@ pub fn desugar(
                             .clone()
                             .map(|x| VarKind::Named(x.0))
                             .unwrap_or(VarKind::Idx(())),
-                        param_ty: Box::new(binding.ty
-                            .ok_or(ExprError::MissingType(item))?),
+                        param_ty: Box::new(binding.ty.ok_or(ExprError::MissingType(item.1))?),
                         ret_ty: Box::new(acc?),
                     },
                     loc.clone(),
                 )))
             });
         }
-        Tuple(items) => return create_tuple(items, loc.clone()),
-        Sigma(items) => return create_sigma(items, loc.clone()),
+        Tuple(items) => {
+            let bindings = to_bindings(items, loc.clone());
+            return create_tuple(bindings, loc.clone());
+        }
+        Sigma(items) => {
+            let bindings = to_bindings(items, loc.clone());
+            return create_sigma(bindings, loc.clone());
+        }
         Pipe(items) => {
-
             let mut items = iter_with_loc(items, loc.clone());
             let base = items.next().unwrap();
 
-
             return items.fold(desugar(base.0, base.1), |acc, item| {
-
                 Ok(SpannedExpr((
                     ExprF::App {
                         func: Box::new(acc?),
@@ -466,88 +477,99 @@ pub fn desugar(
                 loc.clone(),
             ))),
         },
-        Ann(items) => {
-            let mut items = iter_with_loc(items, loc);
-
-            let val = items.next().expect("ann should have at least two items");
-
-            return desugar(val.0, val.1);
+        Ann(_) => {
+            let binding = extract_binding(expr, loc.clone(), BindingPriority::ValNameTy)?;
+            return binding.val.ok_or(ExprError::MissingValue(loc.clone()));
         }
-        Binding(items) => {
-
-            let mut items: Vec<_> = iter_with_loc(items, loc).collect();
-            let item = items.pop().expect("binder should have at least two items");
-
-            return desugar(item.0, item.1);
+        Binding(_) => {
+            let binding = extract_binding(expr, loc.clone(), BindingPriority::ValNameTy)?;
+            return binding.val.ok_or(ExprError::MissingValue(loc.clone()));
         }
 
-        Module(_deps, items, self_dep) => {
-            println!("TODO: only implicit dependency on the module itself is handled {loc:?}");
+        Module(_deps, items) => {
+            //TODO: only implicit dependency on the module itself is handled
 
             let loc_items = push_new(loc.clone(), 1);
 
-            // TODO: Both tuple and sigma compile the body twice which is not what we want
-            let inner = create_tuple(items.clone(), loc_items.clone());
-            let inner_ty = create_sigma(items.clone(), loc_items.clone())?;
+            let bindings = to_bindings(items, loc_items.clone());
 
-            let items = iter_with_loc(items, loc_items.clone());
+            let inner = create_tuple(bindings.clone(), loc_items.clone());
+            let inner_ty = create_sigma(bindings.clone(), loc_items.clone())?;
 
-
-            let res =
             // HACK: we wrap in lambdas until we can do proper field access
-                if self_dep {
-                    // a1 => a2 => ... => an => A
-                    let expr = items.rev().fold(
-                        inner,
-                        |acc, item| {
+            // a1 => a2 => ... => an => A
+            let expr = bindings.clone().into_iter().rev().fold(inner, |acc, item| {
+                let binding = item.0?;
 
-                            let binding = extract_binding(item.0.clone(), item.1.clone(), true)?;
-
-                            Ok(SpannedExpr((
-                                ExprF::Lambda {
-                                    name: binding
-                                        .name
-                                        .clone()
-                                        .map(|x| VarKind::Named(x.0))
-                                        .unwrap_or(VarKind::Idx(())),
-                                    param_ty: Box::new(binding.ty.ok_or(
-                                        ExprError::MissingType(item.clone()),
-                                    )?),
-                                    body: Box::new(acc?),
-                                },
-                                loc_items.clone(),
-                            )))
-                        },
-                    );
-
-                    // A -> A
-                    Ok(SpannedExpr((
-                    ExprF::Lambda { 
-                        name: VarKind::Idx(()),
-                        param_ty: Box::new(inner_ty),
-                        body: Box::new(SpannedExpr((ExprF::App {
-                            func: Box::new(SpannedExpr(
-                                (ExprF::Var {
-                                    idx: VarKind::Idx(0)},
-                                loc_items.clone()))),
-                            arg: Box::new(expr?) }, loc_items.clone())))},
-                    loc_items.clone()
+                Ok(SpannedExpr((
+                    ExprF::Lambda {
+                        name: binding
+                            .name
+                            .clone()
+                            .map(|x| VarKind::Named(x.0))
+                            .unwrap_or(VarKind::Idx(())),
+                        param_ty: Box::new(
+                            binding.ty.ok_or(ExprError::MissingType(item.1.clone()))?,
+                        ),
+                        body: Box::new(acc?),
+                    },
+                    loc.clone(),
                 )))
+            });
 
-                } else {
-                    inner
-                };
-            return res;
+            // A => 0 expr
+
+            ExprF::Lambda {
+                name: VarKind::Idx(()),
+                param_ty: Box::new(inner_ty.clone()),
+                body: Box::new(SpannedExpr((
+                    ExprF::App {
+                        func: Box::new(SpannedExpr((
+                            ExprF::App {
+                                func: Box::new(SpannedExpr((
+                                    ExprF::Var {
+                                        idx: VarKind::Idx(0),
+                                    },
+                                    loc.clone(),
+                                ))),
+                                arg: Box::new(inner_ty),
+                            },
+                            loc.clone(),
+                        ))),
+                        arg: Box::new(expr?),
+                    },
+                    loc.clone(),
+                ))),
+            }
         }
     };
+
     Ok(SpannedExpr((new_expr, loc.clone())))
 }
 
-// (R : Type) => (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) => f x y z
-pub fn create_tuple(
+fn to_bindings(
     items: Vec<FixAst>,
     loc: Vec<usize>,
-) -> Result<SpannedNamedExpr, ExprError<Spanned<FixAst>>> {
+) -> Vec<Spanned<Result<TypedBinding, ExprError<Vec<usize>>>>> {
+    let items = iter_with_loc(items, loc.clone());
+    items
+        .map(|x| {
+            (
+                extract_binding(x.0, x.1.clone(), BindingPriority::ValNameTy),
+                x.1,
+            )
+        })
+        .collect()
+}
+
+// normally An are type level lambdas but in this case it is actually a lambda with a free variable
+// so name resolution will solve it
+// (R : Type) => (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) => f value_x value_y value_z
+// 0 Unit : ()
+pub fn create_tuple(
+    items: Vec<Spanned<Result<TypedBinding, ExprError<Vec<usize>>>>>,
+    loc: Vec<usize>,
+) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
     let items_len = items.len();
     // the f in the function body
     let f_var = SpannedExpr((
@@ -557,24 +579,17 @@ pub fn create_tuple(
         loc.clone(),
     ));
 
-    let items = iter_with_loc(items, loc.clone());
+    let body = items.clone().into_iter().fold(Ok(f_var), |acc, item| {
+        let binding = item.0?;
 
-    let body = items.clone().fold(Ok(f_var), |acc, item| {
-            let binding = extract_binding(item.0.clone(), item.1.clone(), false)?;
-
-
-            Ok(SpannedExpr((
-                ExprF::App {
-                    func: Box::new(acc?),
-                    arg: Box::new(
-                        binding
-                            .val
-                            .ok_or(ExprError::MissingValue(item.clone()))?,
-                    ),
-                },
-                item.1.clone(),
-            )))
-        })?;
+        Ok(SpannedExpr((
+            ExprF::App {
+                func: Box::new(acc?),
+                arg: Box::new(binding.val.ok_or(ExprError::MissingValue(item.1.clone()))?),
+            },
+            item.1.clone(),
+        )))
+    })?;
 
     // the R as the return type of f
     let r_type = SpannedExpr((
@@ -584,30 +599,26 @@ pub fn create_tuple(
         loc.clone(),
     ));
 
+    let f_type = items
+        .clone()
+        .into_iter()
+        .rev()
+        .fold(Ok(r_type.clone()), |acc, item| {
+            let binding = item.0?;
 
-    let f_type =
-            items.rev()
-            .fold(Ok(r_type.clone()), |acc, item| {
-                let binding = extract_binding(item.0.clone(), item.1.clone(), false)?;
+            Ok(SpannedExpr((
+                ExprF::Pi {
+                    name: binding
+                        .name
+                        .map(|x| VarKind::Named(x.0))
+                        .ok_or(ExprError::MissingBinder(item.1.clone()))?,
 
-
-                Ok(SpannedExpr((
-                    ExprF::Pi {
-                        name: binding
-                            .name
-                            .map(|x| VarKind::Named(x.0))
-                            .ok_or(ExprError::MissingBinder(item.clone()))?,
-
-                        param_ty: Box::new(
-                            binding
-                                .ty
-                                .ok_or(ExprError::MissingType(item.clone()))?,
-                        ),
-                        ret_ty: Box::new(acc?),
-                    },
-                    item.1.clone(),
-                )))
-            })?;
+                    param_ty: Box::new(binding.ty.ok_or(ExprError::MissingType(item.1.clone()))?),
+                    ret_ty: Box::new(acc?),
+                },
+                item.1.clone(),
+            )))
+        })?;
 
     Ok(SpannedExpr((
         ExprF::Lambda {
@@ -628,9 +639,9 @@ pub fn create_tuple(
 
 // (R : Type) -> (f : (x : A1) -> (y : A2 x) -> (z : A3 x y) -> R) -> R
 pub fn create_sigma(
-    items: Vec<FixAst>,
+    items: Vec<Spanned<Result<TypedBinding, ExprError<Vec<usize>>>>>,
     loc: Vec<usize>,
-) -> Result<SpannedNamedExpr, ExprError<Spanned<FixAst>>> {
+) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
     // the R as the return type of f
     let r_type = SpannedExpr((
         ExprF::Var {
@@ -639,31 +650,26 @@ pub fn create_sigma(
         loc.clone(),
     ));
 
-    let items = iter_with_loc(items, loc.clone());
-
-    let f_type = items.rev().fold(
-        Ok(r_type.clone()),
-        |acc, item| {
-            let binding = extract_binding(item.0.clone(), item.1.clone(), false)?;
+    let f_type = items
+        .into_iter()
+        .rev()
+        .fold(Ok(r_type.clone()), |acc, item| {
+            let binding = item.0?;
 
             Ok(SpannedExpr((
                 ExprF::Pi {
                     name: binding
                         .name
                         .map(|x| VarKind::Named(x.0))
-                        .ok_or(ExprError::MissingBinder(item.clone()))?,
+                        .ok_or(ExprError::MissingBinder(item.1.clone()))?,
 
-                    param_ty: Box::new(
-                        binding
-                            .ty
-                            .ok_or(ExprError::MissingType(item.clone()))?,
-                    ),
+                    param_ty: Box::new(binding.ty.ok_or(ExprError::MissingType(item.1.clone()))?),
                     ret_ty: Box::new(acc?),
                 },
                 item.1.clone(),
             )))
-        },
-    )?;
+        })?;
+
     Ok(SpannedExpr((
         ExprF::Pi {
             name: VarKind::Idx(()),
@@ -672,7 +678,12 @@ pub fn create_sigma(
                 ExprF::Pi {
                     name: VarKind::Idx(()),
                     param_ty: Box::new(f_type),
-                    ret_ty: Box::new(r_type),
+                    ret_ty: Box::new(SpannedExpr((
+                        ExprF::Var {
+                            idx: VarKind::Idx(1),
+                        },
+                        loc.clone(),
+                    ))),
                 },
                 loc.clone(),
             ))),
@@ -680,4 +691,3 @@ pub fn create_sigma(
         loc.clone(),
     )))
 }
-

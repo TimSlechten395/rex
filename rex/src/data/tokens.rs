@@ -179,7 +179,7 @@ impl Display for Token<AbsoluteIndent> {
     }
 }
 
-// maps span from Token to ExpectedToken
+// maps span from Token to ExpectedToken spans are inclusive
 pub fn tok_span_to_result_tok_span(
     span: Range<usize>,
     full_tokens: &[Spanned<ExpectedToken<AbsoluteIndent>>],
@@ -202,15 +202,19 @@ pub fn tok_span_to_result_tok_span(
 
     let start = start_idx.ok_or(anyhow!("start index not in range"))?;
 
-    let end = end_idx.ok_or(anyhow!("end index not in range"))?;
+    let end = end_idx.ok_or(anyhow!(
+        "end index not in range: {:?} len was {:?}",
+        span.end,
+        ok_count
+    ))?;
     Ok(start..end)
 }
 
+// tok_span is inclusive char_span is exclusive
 pub fn result_tok_span_to_char_span(
     span: Range<usize>,
     toks: &[Spanned<ExpectedToken<AbsoluteIndent>>],
 ) -> anyhow::Result<Range<usize>> {
-    // our range is inclusive but chumsky span is exclusive
     let start = toks
         .get(span.start)
         .ok_or(anyhow!("start token not in stream: {:?}", span.start))?

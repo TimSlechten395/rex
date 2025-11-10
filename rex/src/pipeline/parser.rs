@@ -27,6 +27,10 @@ enum TokenTree {
     Dot(Vec<Spanned<TokenTree>>),
 }
 
+// idea every new indentations starts a new block
+// if it is a module block then each line is a definition
+// if it is a continuation block each line is just the continuation of the previous one
+
 pub type Spanned<T> = (T, Range<usize>);
 
 // NOTE: our span is range_inclusive
@@ -34,7 +38,7 @@ pub fn parse(tokens: Vec<Token<AbsoluteIndent>>) -> SpannedResultAst {
     let end = tokens.len();
 
     // indentation should be important
-    let mut ignore_new_lines = tokens
+    let ignore_new_lines = tokens
         .into_iter()
         .enumerate()
         .filter(|x| {
@@ -46,25 +50,43 @@ pub fn parse(tokens: Vec<Token<AbsoluteIndent>>) -> SpannedResultAst {
         })
         .collect::<Vec<_>>();
 
-    let self_dep = Some(&Token::Mod) == ignore_new_lines.first().map(|x| &x.1);
+    // if there is one that starts with def we name resolve
+    let items = ignore_new_lines.split(|x| if let Token::Def = x.1 { true } else { false });
 
-    if self_dep {
-        ignore_new_lines.remove(0);
-    }
+    let is_mod = &items.clone().next().is_some_and(|x| x.is_empty());
 
-    let items = ignore_new_lines
-        .split(|x| if let Token::Def = x.1 { true } else { false })
-        .filter(|x| !x.is_empty());
+    let mut items = items.filter(|x| !x.is_empty());
 
-    SpannedResultAst((
-        Ok(Ast::Module(
+    // if its a list of definitions is a module else it depends
+    let ast = if *is_mod {
+        Ast::Module(
             Vec::new(),
             items
                 .map(|x| parse_assign(&parse_group_start(&mut x.to_vec().into_iter())))
                 .collect(),
-            self_dep,
-        )),
-        Range { start: 0, end },
+        )
+    } else {
+        match items.clone().count() {
+            0 => Ast::Unit,
+            1 => {
+                return parse_assign(&parse_group_start(
+                    &mut items.next().unwrap().to_vec().into_iter(),
+                ));
+            }
+            _ => Ast::Sigma(
+                items
+                    .map(|x| parse_assign(&parse_group_start(&mut x.to_vec().into_iter())))
+                    .collect(),
+            ),
+        }
+    };
+
+    SpannedResultAst((
+        Ok(ast),
+        Range {
+            start: 0,
+            end: end - 1,
+        },
     ))
 }
 

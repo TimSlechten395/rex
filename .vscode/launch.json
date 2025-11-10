@@ -39,7 +39,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["a.rx"],
+            "args": ["temp.rx"],
             "cwd": "${workspaceFolder}"
         },
         {

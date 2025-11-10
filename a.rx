@@ -1,10 +1,13 @@
-// Types use ... -> ... and functions fn ... => ...
 
-// 1: Unit type and value also called top
-((A: Type) -> A -> A),
+unit: R -> R
+void: (R: Type) -> R
 
-(fn (A: Type) (x: A) => x),
-(fn (A: Type) => A),
-(Type, ((A: Type) -> A -> A), Type),
+sum: (A -> R) -> (B -> R) -> R | R^A * R^B
+sum': (A -> R) -> R | R^B
+
+tuple: (A -> B -> R) -> R
+sum: (A -> R) -> (B -> R) -> R
 
 
+1 + 1
+(A -> A) -> (B -> B)

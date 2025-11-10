@@ -1,6 +1,8 @@
 use core::fmt;
+use std::fmt::Debug;
 use std::fmt::{Display, Formatter};
 
+use anyhow::anyhow;
 use anyhow::bail;
 use functor_derive::Functor;
 use thiserror::Error;
@@ -99,34 +101,34 @@ impl Display for VarKind<String, usize> {
 
 pub type NamedExpr = GExpr<VarKind<String, usize>, VarKind<String, ()>>;
 
-impl<A, B> Traverse for GExpr<A, B> {
+impl<A: Debug + Clone, B: Debug + Clone> Traverse for GExpr<A, B> {
     type Span = Vec<usize>;
     fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
         let mut path = path.into_iter();
         let current = path.next();
         match current {
-            Some(cur) => match self.0 {
+            Some(cur) => match self.0.clone() {
                 ExprF::Var { .. } => {
-                    bail!("invalid path")
+                    bail!("invalid path in {:?}", &self.0)
                 }
                 ExprF::App { func, arg } => match cur {
                     0 => func.traverse(path.collect()),
                     1 => arg.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in {:?}", &self.0),
                 },
                 ExprF::Lambda { param_ty, body, .. } => match cur {
                     0 => param_ty.traverse(path.collect()),
                     1 => body.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in {:?}", &self.0),
                 },
                 ExprF::Pi {
                     param_ty, ret_ty, ..
                 } => match cur {
                     0 => param_ty.traverse(path.collect()),
                     1 => ret_ty.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in {:?}", &self.0),
                 },
-                ExprF::Type => bail!("invalid path"),
+                ExprF::Type => bail!("invalid path in {:?}", &self.0),
             },
 
             None => Ok(Box::new(self)),
@@ -163,6 +165,12 @@ pub enum ExprError<T> {
 
     #[error("invalid binder param: {0:?}")]
     InvalidBinderParam(T),
+
+    #[error("arbitrary binders are not supported: {0:?}")]
+    ArbitraryBinding(T),
+
+    #[error("arbitrary type annotation is not supported: {0:?}")]
+    ArbitraryAnn(T),
 }
 
 pub type SpannedNamedExpr = SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>;
@@ -199,34 +207,34 @@ impl<A, B> SpannedExpr<A, B> {
     }
 }
 
-impl<A, B> Traverse for SpannedExpr<A, B> {
+impl<A: Debug + Clone, B: Debug + Clone> Traverse for SpannedExpr<A, B> {
     type Span = Vec<usize>;
     fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
         let mut path = path.into_iter();
+
+        let err = anyhow!("invalid path in {:?}, path: {:?}", &self.0.0, path);
         let current = path.next();
+
         match current {
-            Some(cur) => match self.0.0 {
-                ExprF::Var { .. } => {
-                    bail!("invalid path")
-                }
+            Some(cur) => match self.0.0.clone() {
+                ExprF::Var { .. } | ExprF::Type => Err(err),
                 ExprF::App { func, arg } => match cur {
                     0 => func.traverse(path.collect()),
                     1 => arg.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => Err(err),
                 },
                 ExprF::Lambda { param_ty, body, .. } => match cur {
                     0 => param_ty.traverse(path.collect()),
                     1 => body.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => Err(err),
                 },
                 ExprF::Pi {
                     param_ty, ret_ty, ..
                 } => match cur {
                     0 => param_ty.traverse(path.collect()),
                     1 => ret_ty.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => Err(err),
                 },
-                ExprF::Type => bail!("invalid path"),
             },
 
             None => Ok(Box::new(self)),

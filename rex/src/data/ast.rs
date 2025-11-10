@@ -35,8 +35,8 @@ pub enum Ast<T> {
     // to be converted to product type
     // pub/priv is done with an extra module that just takes the full module and returns a smaller
     // module
-    // bool is temporary self dep indicator
-    Module(Vec<T>, Vec<T>, bool),
+    // always depends one self
+    Module(Vec<T>, Vec<T>),
 
     // Multi-argument Lambda (sugar for nested single-arg lambdas)
     // Example: `(lambda (x:T) (y:U) body)`
@@ -76,12 +76,12 @@ impl<T: Display> Display for Ast<T> {
             Pipe(exprs) => join_fmt(f, exprs, " |> "),
             Group(expr) => write!(f, "({expr})"),
 
-            Module(deps, items, selfdep) => {
+            Module(deps, items) => {
                 write!(f, "module(deps=[")?;
                 join_fmt(f, deps, "\n")?;
                 write!(f, "], items=[\n def ")?;
                 join_fmt(f, items, "\n def ")?;
-                write!(f, "], selfdep={})", selfdep)
+                write!(f, "]")
             }
         }
     }
@@ -181,11 +181,11 @@ impl Traverse for SpannedFixAst {
 
         use Ast::*;
         match current {
-            Some(cur) => match self.0.0 {
-                Unit | Var(_) | Type | Lit(_) => bail!("invalid path"),
+            Some(cur) => match self.0.0.clone() {
+                Unit | Var(_) | Type | Lit(_) => bail!("invalid path in {:?}", &self.0.0),
                 Group(e) => match cur {
                     0 => e.traverse(path.collect()),
-                    _ => bail!("invalid path"),
+                    _ => bail!("invalid path in {:?}", &self.0.0),
                 },
 
                 Tuple(items) | Sigma(items) | App(items) | Ann(items) | Binding(items)
@@ -193,7 +193,7 @@ impl Traverse for SpannedFixAst {
                     if let Some(param) = items.get(cur) {
                         param.clone().traverse(path.collect())
                     } else {
-                        bail!("invalid path")
+                        bail!("invalid path in {:?}", &self.0.0)
                     }
                 }
                 // SugarExpr::LetIn(_, ty, val, body) => match cur {
@@ -204,9 +204,10 @@ impl Traverse for SpannedFixAst {
                 // },
                 Module(items1, items2, ..) => match cur {
                     0 => {
-                        let cur = path
-                            .next()
-                            .ok_or(anyhow!("pointed to mod deps without giving dep"))?;
+                        let cur = match path.next() {
+                            Some(ok) => ok,
+                            None => return Ok(Box::new(self)),
+                        };
                         if let Some(param) = items1.get(cur) {
                             param.clone().traverse(path.collect())
                         } else {
@@ -218,9 +219,11 @@ impl Traverse for SpannedFixAst {
                         }
                     }
                     1 => {
-                        let cur = path
-                            .next()
-                            .ok_or(anyhow!("pointed to mod items without giving item"))?;
+                        let cur = match path.next() {
+                            Some(ok) => ok,
+                            None => return Ok(Box::new(self)),
+                        };
+
                         if let Some(param) = items2.get(cur) {
                             param.clone().traverse(path.collect())
                         } else {
