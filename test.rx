@@ -66,3 +66,5 @@ let U8: Type = fn (A: Type) (f: A -> A) (x: A) (p: Eq (pow_2_8 A f x)) => A;
 let u8_zero: U8 = fn (A: Type) (f: A -> A) (x: A) (p: Eq (pow_2_8 A f x) x) => x;
 let u8_succ: U8 -> U8 = fn (n: U8) (A: Type) (f: A -> A) (x: A) (p: Eq (pow_2_8 A f x) x) => f (n A f x p);
 unit
+
+Zipper t: (focus: Zipper t, t -> Zipper t)

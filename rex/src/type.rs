@@ -51,6 +51,52 @@ pub fn err_with_nodes(err: TypeError<ExprId>, sea: &SeaOfNodes) -> Option<TypeEr
 //
 // Alternative: Instead of making Pi the binder and substituting directly while type checking we
 // could wrap ret_ty in a lambda and then just return App ret_ty arg
+pub fn eq(e1: Expr, e2: Expr) -> bool {
+    if e1 == e2 {
+        return true;
+    }
+    let e1_norm = weak_head_normal_form(e1);
+    let e2_norm = weak_head_normal_form(e2);
+
+    // there should be some way to check eq except recursive param
+    match (e1_norm.0, e2_norm.0) {
+        (ExprF::Var { idx }, ExprF::Var { idx: idx2 }) => idx == idx2,
+        (
+            ExprF::App { func, arg },
+            ExprF::App {
+                func: func2,
+                arg: arg2,
+            },
+        ) => eq(*func, *func2) && eq(*arg, *arg2),
+        (
+            ExprF::Lambda {
+                name: _,
+                param_ty,
+                body,
+            },
+            ExprF::Lambda {
+                name: _,
+                param_ty: param_ty2,
+                body: body2,
+            },
+        ) => eq(*param_ty, *param_ty2) && eq(*body, *body2),
+        (
+            ExprF::Pi {
+                name: _,
+                param_ty,
+                ret_ty,
+            },
+            ExprF::Pi {
+                name: _,
+                param_ty: param_ty2,
+                ret_ty: ret_ty2,
+            },
+        ) => eq(*param_ty, *param_ty2) && eq(*ret_ty, *ret_ty2),
+        (ExprF::Type, ExprF::Type) => true,
+        _ => false,
+    }
+}
+
 pub fn infer_type(
     expr: Expr,
 
@@ -86,23 +132,9 @@ pub fn infer_type(
                 ExprF::Pi {
                     param_ty, ret_ty, ..
                 } => {
-                    // This points to the param_ty of the func
-
                     let arg_ty = infer_type(*arg.clone(), ctx.clone(), ty_errors, loc1.clone())?;
 
-                    // We would like infinite terms like omega to also be able to check for
-                    // equality so we should normalize until both types loop and then check
-                    // only then check equality
-
-                    let arg_ty_norm = normal_form(arg_ty.clone());
-                    let param_ty_norm = normal_form(*param_ty.clone());
-
-                    if param_ty_norm != arg_ty_norm {
-                        dbg!(&arg);
-                        dbg!(&func);
-                        // dbg!(&arg_ty);
-                        // dbg!(&param_ty);
-                        // println!("--------");
+                    if eq(*param_ty, arg_ty) {
                         ty_errors.push(TypeError::TypeMismatch {
                             expected: loc0.clone(),
                             found: loc1.clone(),
@@ -120,27 +152,23 @@ pub fn infer_type(
                     //     arg: arg,
                     // }
                 }
-                other => {
-                    dbg!(func);
-                    dbg!(func_ty);
-                    dbg!(ctx);
+                _ => {
                     return Err(TypeError::NotAFunction(loc0));
                 }
             }
         }
         // push the type of the parameter and infer the type of the body
         ExprF::Lambda { param_ty, body, .. } => {
-            let tyty = ExprF::Type;
+            let tyty = GExpr(ExprF::Type);
 
             let param_ty_ty = infer_type(
                 *param_ty.clone(),
                 ctx.clone(),
                 ty_errors,
                 push_new(loc.clone(), 0).clone(),
-            )?
-            .0;
+            )?;
 
-            if param_ty_ty != tyty.clone() {
+            if eq(param_ty_ty, tyty.clone()) {
                 ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 0)));
             }
 
@@ -154,22 +182,21 @@ pub fn infer_type(
                 ret_ty: Box::new(ret_ty),
             }
         }
+        // Do we need to check if these are types here? maybe check only later when pi type is
+        // actually used?
         ExprF::Pi {
             param_ty, ret_ty, ..
         } => {
-            let tyty = ExprF::Type;
+            let tyty = GExpr(ExprF::Type);
 
             let param_ty_ty = infer_type(
                 *param_ty.clone(),
                 ctx.clone(),
                 ty_errors,
                 push_new(loc.clone(), 0).clone(),
-            )?
-            .0;
+            )?;
 
-            if param_ty_ty != tyty.clone() {
-                dbg!(&param_ty);
-                dbg!(&param_ty_ty);
+            if eq(param_ty_ty.clone(), tyty.clone()) {
                 ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 0)));
             }
 
@@ -178,11 +205,11 @@ pub fn infer_type(
             let ret_ty_ty =
                 infer_type(*ret_ty.clone(), ctx2, ty_errors, push_new(loc.clone(), 1))?.0;
 
-            if ret_ty_ty != tyty.clone() {
+            if eq(param_ty_ty, tyty.clone()) {
                 ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 1)));
             }
 
-            tyty
+            tyty.0
         }
         // always return type
         ExprF::Type => ExprF::Type,

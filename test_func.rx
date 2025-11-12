@@ -14,9 +14,9 @@ def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
 
 // if we defined it like this: "def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)" in the current version
 // it would expand to "succ: Nat -> Nat := (n: Nat) => (A: Type) => (f: A -> A) => (x: A) => f (n A f x)" which is invalid because Nat shows up in the value where
-// it is not yet defined to be a Type. In the future the expansion will be different so it should work correctly. The param_ty field of the lambda might even be removed entirely
+// it is still an unknown value. In the future the expansion will be different so it should work correctly. The param_ty field of the lambda might even be removed entirely
 
-def succ (n: (A: Type) -> (A -> A) -> A -> A): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
 
 
 def add (m: (A: Type) -> (A -> A) -> A -> A) (n: (A: Type) -> (A -> A) -> A -> A): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)

@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use crate::Traverse;
 
+// maybe split up T in value and type, most of the time they need to be the same but not always
+//for examlpe, you might want to have an Option for the type but not for for the Value
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
 pub enum ExprF<T, A, B> {
     Var { idx: A },
@@ -16,6 +18,64 @@ pub enum ExprF<T, A, B> {
     Lambda { name: B, param_ty: T, body: T },
     Pi { name: B, param_ty: T, ret_ty: T },
     Type,
+}
+
+// Experimental: allow annotations everywhere and use them to derive missing types
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
+pub enum AnnExprF<T, A, B> {
+    Expr(ExprF<Option<T>, A, B>),
+    Ann(T, T),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
+pub struct AnnExpr<A, B>(AnnExprF<Box<AnnExpr<A, B>>, A, B>);
+
+// this will require higher level unification but for now we will handle simple type annotations
+fn convert<A: Clone, B: Clone>(ann_expr: AnnExpr<A, B>) -> Option<GExpr<A, B>> {
+    match ann_expr.0 {
+        AnnExprF::Expr(expr) => match expr {
+            ExprF::Var { idx } => Some(GExpr(ExprF::Var { idx: idx })),
+            ExprF::App { func, arg } => {
+                let func_conv = convert(*func?)?;
+                let arg_conv = convert(*arg?)?;
+                Some(GExpr(ExprF::App {
+                    func: Box::new(func_conv),
+                    arg: Box::new(arg_conv),
+                }))
+            }
+            ExprF::Lambda {
+                name,
+                param_ty,
+                body,
+            } => {
+                let param_ty_conv = convert(*param_ty?)?;
+                let body_conv = convert(*body?)?;
+
+                Some(GExpr(ExprF::Lambda {
+                    name,
+                    param_ty: Box::new(param_ty_conv),
+                    body: Box::new(body_conv),
+                }))
+            }
+            ExprF::Pi {
+                name,
+                param_ty,
+                ret_ty,
+            } => {
+                let param_ty_conv = convert(*param_ty?)?;
+                let ret_ty = convert(*ret_ty?)?;
+
+                Some(GExpr(ExprF::Pi {
+                    name,
+                    param_ty: Box::new(param_ty_conv),
+                    ret_ty: Box::new(ret_ty),
+                }))
+            }
+
+            ExprF::Type => todo!(),
+        },
+        AnnExprF::Ann(expr, ty) => todo!(),
+    }
 }
 
 // TODO: remove parens based on prec and assoc
@@ -57,8 +117,8 @@ impl Display for NamedExpr {
 }
 
 impl<T, A, B> ExprF<T, A, B> {
-    pub fn fold<U>(expr: ExprF<T, A, B>, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
-        match expr {
+    pub fn fold<U>(self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
+        match self {
             ExprF::Var { .. } => init,
             ExprF::App { func, arg } => f(f(init, func), arg),
             ExprF::Lambda { param_ty, body, .. } => f(f(init, param_ty), body),

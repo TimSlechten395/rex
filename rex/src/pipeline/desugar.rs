@@ -217,7 +217,7 @@ pub fn fold_ty(
 
 pub fn fold_val(
     binder: FullBinder,
-    ty: Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>>,
+    body: Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>>,
 ) -> Result<SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>, ExprError<Vec<usize>>> {
     binder
         .1
@@ -225,7 +225,7 @@ pub fn fold_val(
         .into_iter()
         .clone()
         .rev()
-        .fold(ty, |acc, item| {
+        .fold(body, |acc, item| {
             Ok(SpannedExpr((
                 ExprF::Lambda {
                     name: item
@@ -234,6 +234,7 @@ pub fn fold_val(
                         .clone()
                         .map(|x| VarKind::Named(x.0))
                         .unwrap_or(VarKind::Idx(())),
+                    // This is a problem it needs to stay empty
                     param_ty: Box::new(
                         item.0
                             .ty

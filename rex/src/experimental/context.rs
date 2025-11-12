@@ -10,6 +10,8 @@ use super::MemoryRegion;
 // There is no real macro system if you want macros you can just use the compiler as a library
 
 /// ------------------------ Context ---------------------------------------------------
+/// The Context system is not a high priority and can be build inside the language itself with
+/// monads
 pub struct Context {
     context: HashMap<TypeId, Box<dyn Any>>,
 }
