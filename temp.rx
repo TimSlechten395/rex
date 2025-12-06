@@ -1,7 +1,8 @@
+// (R: Type) => (f: (Nat: Type) -> (zero: ((Nat: Type) => Nat) ((A: Type) -> (A -> A) -> A -> A)) -> R) => f ((A: Type) -> (A -> A) -> A -> A) (((Nat: Type) => ((A: Type) => (f: A -> A) => (x: A) => x)) (A: Type) -> (A -> A) -> A -> A)
 
 def Nat: Type := (A: Type) -> (A -> A) -> A -> A
 
 def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
 
-def succ: Nat -> Nat := (n: (A: Type) -> (A -> A) -> A -> A) => (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
-def two: Nat := succ zero
+
+

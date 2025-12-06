@@ -1,3 +1,82 @@
 Y_combinator (A: Type) (f: A -> A) : A :=
+  ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x)) this give use a ((X: Type) -> X -> A) -> A which is no longer polymorphic so self application fails here
   ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))
-  ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))
+
+Y_combinator (f: Type -> Type) : Type :=
+  ((x: (X: Type) -> X -> Type) => f (x ((X: Type) -> X -> Type) x)                         this gives ((X: Type) -> X -> Type) -> Type
+  ((x: (X: Type) -> X -> Type) => f (x ((X: Type) -> X -> A) x))
+
+
+// the empty type
+False : Type := (A : Type) -> A
+
+// the powerset type
+P (A : Type) : Type := A -> Type
+
+// the element that is in its own set
+
+
+U : Type := (X : Type) -> (P (P X) -> X) -> P (P X)
+
+wrap (t: P (P U)): U := (X: Type) => (f: P (P X) -> X) => (p: P X) => t ((u : U) => p (f (u X f)))
+
+u X : (P (P X) -> X) -> P (P X)
+u X f : P (P X)
+f (u X f) : X
+
+p (f (u X f)) : Type
+((u : U) => p (f (u X f))) : U -> Type
+t ((u : U) => p (f (u X f))) : Type
+
+
+
+
+
+P (P U) = (U -> Type) -> Type
+
+
+
+wrap (p : P U) : U
+:= (X: Type) => (f: P X -> X) => f ((u : U) => p u)
+
+U : Type := (X : Type) -> (P X -> X) -> P X
+
+f: P X -> X
+
+u: (X: Type) -> (P X -> X) -> P X
+
+X: Type
+p: U -> Type
+
+p u : Type
+
+
+wrap (p : P U) : U := (X: Type) => (f : P X -> X) => (x: X) => (p x)
+
+forall P: pA.[forall x: U. [(X x) => (P(c({x A} c)))] => (P a)]
+
+
+f: P X -> X
+u: (X: Type) -> (P X -> X) -> P X
+X: Type
+p: U -> Type
+
+u X f: P X
+f (u X f): X
+(u : U) => f (u X f) : U -> X
+p ((u : U) => f (u X f)) : U -> X
+
+
+
+
+
+
+unwrap (u : U) : P U := u U ((p : P U) => wrap p)
+
+R : P U = (u : Type) -> (unwrap u) u -> False
+
+russel : U = wrap R
+
+------------
+
+U: Type := (Type -> Type) -> Type

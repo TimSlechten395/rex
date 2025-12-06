@@ -134,7 +134,7 @@ pub fn infer_type(
                 } => {
                     let arg_ty = infer_type(*arg.clone(), ctx.clone(), ty_errors, loc1.clone())?;
 
-                    if eq(*param_ty, arg_ty) {
+                    if !eq(*param_ty, arg_ty) {
                         ty_errors.push(TypeError::TypeMismatch {
                             expected: loc0.clone(),
                             found: loc1.clone(),
@@ -152,7 +152,8 @@ pub fn infer_type(
                     //     arg: arg,
                     // }
                 }
-                _ => {
+                other => {
+                    dbg!(other);
                     return Err(TypeError::NotAFunction(loc0));
                 }
             }
@@ -168,7 +169,7 @@ pub fn infer_type(
                 push_new(loc.clone(), 0).clone(),
             )?;
 
-            if eq(param_ty_ty, tyty.clone()) {
+            if !eq(param_ty_ty, tyty.clone()) {
                 ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 0)));
             }
 
@@ -196,16 +197,15 @@ pub fn infer_type(
                 push_new(loc.clone(), 0).clone(),
             )?;
 
-            if eq(param_ty_ty.clone(), tyty.clone()) {
+            if !eq(param_ty_ty.clone(), tyty.clone()) {
                 ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 0)));
             }
 
             let ctx2 = extend_ctx(ctx, *param_ty.clone());
 
-            let ret_ty_ty =
-                infer_type(*ret_ty.clone(), ctx2, ty_errors, push_new(loc.clone(), 1))?.0;
+            let ret_ty_ty = infer_type(*ret_ty.clone(), ctx2, ty_errors, push_new(loc.clone(), 1))?;
 
-            if eq(param_ty_ty, tyty.clone()) {
+            if !eq(ret_ty_ty, tyty.clone()) {
                 ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 1)));
             }
 
