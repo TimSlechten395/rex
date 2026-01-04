@@ -16,6 +16,7 @@ use crate::r#type::{TypeError, infer_type};
 pub mod data;
 pub mod pipeline;
 
+pub mod bootstrap;
 pub mod eval;
 
 pub mod helper;
@@ -35,7 +36,7 @@ pub trait CompileError<S> {
 
 pub type Spanned<T, S> = (T, S);
 
-// here we get the wrong error
+// this represents a compiler pass
 pub trait Compile {
     type Input;
     type Output;
