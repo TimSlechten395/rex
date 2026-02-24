@@ -1,6 +1,6 @@
 // use previous compiler for bootstrapping
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::fs;
@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 use crate::data::expr::Expr;
 
-const PREV_COMPILER: LazyCell<Command> = LazyCell::new(|| {
+const PREV_COMPILER: LazyCell<PathBuf> = LazyCell::new(|| {
     let conf = read_kv_file("BOOTSTRAP.txt").unwrap();
     let version = conf
         .get("min_version")
@@ -19,8 +19,7 @@ const PREV_COMPILER: LazyCell<Command> = LazyCell::new(|| {
     // TODO: semver check
     let mut comp_path = PathBuf::from("versions");
     comp_path.push(version);
-
-    std::process::Command::new(&comp_path)
+    comp_path
 });
 
 fn read_kv_file(path: &str) -> anyhow::Result<HashMap<String, String>> {
@@ -42,5 +41,16 @@ fn read_kv_file(path: &str) -> anyhow::Result<HashMap<String, String>> {
 }
 
 fn compile_min_version(code: &str) -> anyhow::Result<Expr> {
-    PREV_COMPILER.arg("code")
+    let output = std::process::Command::new(&LazyCell::force(&PREV_COMPILER))
+        .arg(code)
+        .output()
+        .expect("Failed to exec command");
+
+    if output.status.success() {
+        let expr = serde_json::from_slice::<Expr>(&output.stdout)?;
+        Ok(expr)
+    } else {
+        let err = String::from_utf8_lossy(&output.stdout).to_string();
+        bail!(err)
+    }
 }

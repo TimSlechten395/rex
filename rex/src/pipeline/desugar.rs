@@ -109,12 +109,22 @@ pub fn create_church_num(num: BigUint) -> NamedExpr {
 }
 
 pub fn create_string(s: String) -> NamedExpr {
-    let bit = "(R: Type) -> R -> R -> R";
-    let list = "(A: Type) => (R: Type) -> (A -> R -> R) -> R -> R";
+    let bit_ty = "(R: Type) -> R -> R -> R";
+    let list_ty = "(A: Type) => (R: Type) -> (A -> R -> R) -> R -> R";
+
+    let t = "(R: Type) => (t: R) => (f: R) => t";
+    let f = "(R: Type) => (t: R) => (f: R) => f";
+
+    let nil = "(A: Type) => (R: Type) => (f: A -> R -> R) -> (z: R) => z";
+
+    // (A: Type) -> A -> list A -> list A
+    let cons = "(A: Type) => (head: A) => (tail: list A) => (R: Type) => (f: A -> R -> R) => (z: R) => f head (tail R f z)";
+
+    let bytes = s.into_bytes();
+
     let nat = "(R: Type) -> (R -> R) -> R -> R";
     let array = "(A: Type) => (n: Nat) => (R: Type) -> n Type ((X: Type) => (A -> X)) R -> R";
 
-    // s.into_bytes();
     todo!("implement string literals: {s}")
 }
 

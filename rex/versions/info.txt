@@ -1,1 +1,1 @@
-bootstrapping with only x86 binaries should be fine right
+I do not know how bootstrapping actually works hopefully this is fine

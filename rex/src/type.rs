@@ -11,7 +11,7 @@ use crate::{
     helper::push_new,
 };
 
-#[derive(Debug, Error, Functor)]
+#[derive(Debug, Error, Functor, Clone)]
 pub enum TypeError<T> {
     #[error("found unbound variable: {0:?}")]
     UnboundVariable(T, Vec<Expr>),
@@ -20,9 +20,12 @@ pub enum TypeError<T> {
     TypeMismatch { expected: T, found: T },
 
     // both the following variants are technically also type mismatches;
+
+    // cannot be Type: Type
     #[error("{0:?} is not a function")]
     NotAFunction(T),
 
+    // must be Type: Type
     #[error("{0:?} is not a type")]
     NotAType(T),
 }

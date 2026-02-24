@@ -211,7 +211,7 @@ fn parse_dot(tokens: &[Spanned<TokenTree>]) -> SpannedResultAst {
     parse_app(&expr)
 }
 
-// this is the final case meaning it handles a list of expressions without delimiter
+// this is the final case meaning it handles a list of expressions without delimiters
 fn parse_app(tokens: &[Spanned<TokenTree>]) -> SpannedResultAst {
     let expr: Vec<_> = tokens
         .iter()

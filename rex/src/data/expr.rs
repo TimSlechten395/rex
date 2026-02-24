@@ -5,13 +5,15 @@ use std::fmt::{Display, Formatter};
 use anyhow::anyhow;
 use anyhow::bail;
 use functor_derive::Functor;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::Traverse;
 
 // maybe split up T in value and type, most of the time they need to be the same but not always
 //for examlpe, you might want to have an Option for the type but not for for the Value
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Functor, Serialize, Deserialize)]
 pub enum ExprF<T, A, B> {
     Var { idx: A },
     App { func: T, arg: T },
@@ -130,7 +132,7 @@ impl<T, A, B> ExprF<T, A, B> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GExpr<A, B>(pub ExprF<Box<GExpr<A, B>>, A, B>);
 
 pub type Expr = GExpr<usize, ()>;
