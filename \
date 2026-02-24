@@ -14,33 +14,45 @@ use crate::{
     },
     def::{Def, Defs},
     helper::push_new,
+    tools::printer::print_expr,
 };
 
 pub struct Desugar;
 
 impl Compile for Desugar {
     type Input = Vec<FixAst>;
-    type Output = (Defs, Defs);
+    type Output = Defs;
     // Why is this a Vec<usize>?
     type Error = ExprError<Vec<usize>>;
 
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
-        let mut defs = Vec::new();
-        let mut def_tys = Vec::new();
+        let mut defs = HashMap::new();
 
-        for (i, input) in input.into_iter().enumerate() {
-            let binding = extract_binding(input, vec![i], BindingPriority::NameTyVal)?;
-
-            let name = binding.name.ok_or(ExprError::MissingBinder(vec![i]))?.0;
-            let val = binding.val.ok_or(ExprError::MissingValue(vec![i]))?;
-
-            defs.push((name.clone(), val.clone()));
-
-            if let Some(ty) = binding.ty {
-                def_tys.push((name, ty));
+        for input in input {
+            match input.0 {
+                Ast::Binding(items) => {
+                    let mut items = items.into_iter();
+                    if let Some(name) = items.next() {
+                        if let Ast::Lit(LitKind::String(name)) = name.0 {
+                            if let Some(expr) = items.next() {
+                                let expr = desugar(expr, Vec::new())?;
+                                defs.insert(name, expr);
+                            } else {
+                                return Err(ExprError::InvalidBinder(vec![]));
+                            }
+                        } else {
+                            dbg!("name");
+                            return Err(ExprError::InvalidBinder(vec![]));
+                        }
+                    } else {
+                        println!("empty binder");
+                        return Err(ExprError::InvalidBinder(vec![]));
+                    }
+                }
+                _ => return Err(ExprError::MissingBinder(vec![])),
             }
         }
-        return Ok((defs, def_tys));
+        return Ok(defs);
     }
 }
 
@@ -95,14 +107,7 @@ pub fn create_church_num(num: BigUint) -> NamedExpr {
         idx: VarKind::Idx(0),
     });
 
-    for _ in (0 as u64)
-        ..*num
-            .to_u64_digits()
-            .get(0)
-            .clone()
-            .as_deref()
-            .unwrap_or(&(0 as u64))
-    {
+    for _ in 0..num.to_u64_digits()[0] {
         body = GExpr(ExprF::App {
             func: Box::new(GExpr(ExprF::Var {
                 idx: VarKind::Idx(1),
@@ -137,25 +142,27 @@ pub fn create_church_num(num: BigUint) -> NamedExpr {
 }
 
 pub fn create_string(s: String) -> NamedExpr {
-    let defs = "
-    def Bit := (R: Type) -> R -> R -> R
-    def t := (R: Type) => (t: R) => (f: R) => t
-    def f := (R: Type) => (t: R) => (f: R) => f
-    def List := (A: Type) => (R: Type) -> (A -> R -> R) -> R -> R
-    def nil := (A: Type) => (R: Type) => (f: A -> R -> R) -> (z: R) => z
-    def cons := (A: Type) => (head: A) => (tail: list A) => (R: Type) => (f: A -> R -> R) => (z: R) => f head (tail R f z)
-    def String := List Bit
-    // this mirrors (A -> B) => F A => 
-    def map_string := (g: Bit -> Bit) => (s: String) => (R: Type) => (f: Bit -> R -> R) => (z: R) => s R ((b: Bit) => f (g b)) z
-    def Functor := (F: Type -> Type) => (A: Type) => (B: Type) => (A -> B) -> F A -> F B
+    let bit = "(R: Type) -> R -> R -> R";
 
-    def Nat :=  (R: Type) -> (R -> R) -> R -> R
-    def Array := (A: Type) => (n: Nat) => (R: Type) -> n Type ((X: Type) => (A -> X)) R -> R
-    def Byte := Array Bit 8
+    let t = "(R: Type) => (t: R) => (f: R) => t";
+    let f = "(R: Type) => (t: R) => (f: R) => f";
 
-";
+    let list = "(A: Type) => (R: Type) -> (A -> R -> R) -> R -> R";
+
+    let nil = "(A: Type) => (R: Type) => (f: A -> R -> R) -> (z: R) => z";
+
+    // (A: Type) -> A -> list A -> list A
+    let cons = "(A: Type) => (head: A) => (tail: list A) => (R: Type) => (f: A -> R -> R) => (z: R) => f head (tail R f z)";
+
+    let string = "list bit";
+
+    let map = "(g: bit -> bit) => (s: string) => (R: Type) => (f: bit -> R -> R) => (z: R) => s R ((b: bit) => f (g b)) z";
 
     let bytes = s.clone().into_bytes();
+
+    let nat = "(R: Type) -> (R -> R) -> R -> R";
+    let array = "(A: Type) => (n: Nat) => (R: Type) -> n Type ((X: Type) => (A -> X)) R -> R";
+
     todo!("implement string literals: {s}")
 }
 
@@ -586,8 +593,7 @@ pub struct TypedBindingNoOption {
     val: SpannedNamedExpr,
 }
 
-// replace definitions while also changing definitions at runtime
-pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr {
+fn replace_unbounded_names(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr {
     fn go(expr: SpannedNamedExpr, ctx: &mut Vec<String>, defs: &mut Defs) -> SpannedNamedExpr {
         let new = match expr.0.0 {
             ExprF::Var { idx } => match idx {
@@ -597,15 +603,11 @@ pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr
                             idx: VarKind::Named(s),
                         }
                     } else {
-                        match defs.iter().rposition(|(name, _)| *name == s) {
-                            Some(pos) => {
-                                let (_, expr) = defs.get_mut(pos).unwrap();
+                        match defs.get(&s) {
+                            Some(expr) => {
                                 // println!("replaced {s} with {expr:?}");
                                 // println!("-------------------------");
-                                let new_expr = replace_defs(expr.clone(), defs);
-                                let (_, expr) = defs.get_mut(pos).unwrap();
-                                *expr = new_expr.clone();
-                                return new_expr;
+                                return expr.clone();
                             }
                             None => {
                                 // println!("could not find name: {s}");
@@ -672,8 +674,8 @@ pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr
 
 pub fn add_defs(items: Vec<Def>, defs: &mut Defs) {
     for item in items {
-        let expr = replace_defs(item.expr, defs);
-        defs.push((item.name, expr));
+        let expr = replace_unbounded_names(item.expr, defs);
+        defs.insert(item.name, expr);
     }
 }
 
@@ -705,13 +707,13 @@ pub fn create_subs_prev_typed(
             .map(|x| x.0)
             .filter_map(|x| Some((x.name.map(|x| x.0)?, x.val)));
 
-        let mut defs = Vec::new();
+        let mut defs = HashMap::new();
         for item in tuple_ctx {
-            defs.push((item.0, item.1));
+            defs.insert(item.0, item.1);
         }
 
-        let ty = replace_defs(item.ty, &mut defs);
-        let val = replace_defs(item.val, &mut defs);
+        let ty = replace_unbounded_names(item.ty, &mut defs);
+        let val = replace_unbounded_names(item.val, &mut defs);
         new_items.push((
             TypedBindingNoOption {
                 name: item.name,

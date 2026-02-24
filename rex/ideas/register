@@ -1,0 +1,4 @@
+an import system should concist of a single object which holds the meaning of words
+the meaning of a word can be changed for any scope
+the object should be a fixed point where definitions can depend on other definitions
+the definitions are not seethrough meaning it does not act as a shortcut

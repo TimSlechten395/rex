@@ -41,8 +41,9 @@ impl Token<RelativeIndent> {
             Token::RBrace => Token::RBrace,
             Token::LBracket => Token::LBracket,
             Token::RBracket => Token::RBracket,
+            Token::Hashtag => Token::Hashtag,
             Token::Type => Token::Type,
-            Token::Mod => Token::Type,
+            Token::Mod => Token::Mod,
             Token::Eq => Token::Eq,
             Token::Assign => Token::Assign,
 
@@ -96,14 +97,15 @@ pub enum Token<Indent> {
     Arrow,     // "->"
     DoubleArrow,
     Pipe,
-    Star,   // '*'
-    Comma,  // ','
-    LParen, // '('
-    RParen, // ')'
-    LBrace,
-    RBrace,
-    LBracket,
-    RBracket,
+    Star,     // '*'
+    Comma,    // ','
+    LParen,   // '('
+    RParen,   // ')'
+    LBrace,   // {
+    RBrace,   // }
+    LBracket, // [
+    RBracket, // ]
+    Hashtag,  // #
 
     Type,
 
@@ -158,6 +160,7 @@ impl Display for Token<AbsoluteIndent> {
             Token::RBrace => write!(f, "}}"),
             Token::LBracket => write!(f, "["),
             Token::RBracket => write!(f, "]"),
+            Token::Hashtag => write!(f, "#"),
 
             Token::Type => write!(f, "Type"),
             Token::Mod => write!(f, "Mod"),

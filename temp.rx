@@ -1,8 +1,64 @@
 // (R: Type) => (f: (Nat: Type) -> (zero: ((Nat: Type) => Nat) ((A: Type) -> (A -> A) -> A -> A)) -> R) => f ((A: Type) -> (A -> A) -> A -> A) (((Nat: Type) => ((A: Type) => (f: A -> A) => (x: A) => x)) (A: Type) -> (A -> A) -> A -> A)
+def Never: Type := (A: Type) -> A
+
+def unit (A: Type) (x: A) : A := x
 
 def Nat: Type := (A: Type) -> (A -> A) -> A -> A
 
 def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
 
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+
+def add (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
+
+def Bool: Type := (R: Type) -> R -> R -> R
+
+def t: Bool := (R: Type) => (t: R) => (f: R) => t
+def f: Bool := (R: Type) => (t: R) => (f: R) => f
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+def one_and_one_is_two: Eq Nat (add (succ zero) (succ zero)) (succ (succ zero)) := refl Nat (succ (succ zero))
+
+def List (A: Type) := (R: Type) -> (A -> R -> R) -> R -> R
+
+def nums: List Nat := (R: Type) => (c: Nat -> R -> R) => (n: R) => c 1 (c 2 (c 3 n)) 
+
+def flags: List Bool := (R: Type) => (c: Bool -> R -> R) => (n: R) => c t (c t (c f (c t n))) 
+
+def len (A: Type) (l: List A): Nat := l Nat ((_: A) => (n: Nat) => succ n) zero
+
+def test := len Nat nums
+def test2 := len Bool flags
+
+def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
+def left (A: Type) (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
+def right (A: Type) (B: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
+
+def Map (F: Type -> Type) := (A: Type) -> (B: Type) -> (A -> B) -> F A -> F B
+
+def list_map: Map List := (A: Type) => (B: Type) => (g: A -> B) => (l: List A) => (R: Type) => (f: B -> R -> R) => (n: R) => l R ((h: A) => (t: R) => f (g h) t) n
+
+// Pointwise equality
+def Equiv (A: Type) (B: Type) (f: A -> B) (g: A -> B): Type := (a: A) -> Eq B (f a) (g a)
+def equiv_refl (A: Type) (B: Type) (f: A -> B): Equiv A B f f := (a: A) => refl B (f a)
+
+// this type can only be used to create extensionally equal functions
+def Equiv2 (A: Type) (x: A) (y: A): Type := (B: Type) -> (C: Type) -> (f: A -> (B -> C)) -> Equiv B C (f x) (f y)
 
 
+def Decidable (A: Type): Type := (a: A) -> (b: A) -> Either (Eq A a b) (Eq A a b -> Never)
+
+// def one_eq_one: Type := Equiv Type ((A -> A) -> A -> A) 0 1
+
+def Pi (A: Type) (B: Type) := A -> B
+
+def needed (n: Nat): Type := (Q: Type) -> n Type (Pi Q) Q
+
+def one_neq_zero: Eq Nat 1 0 -> Never := (transport: (P: Nat -> Type) -> P 1 -> P 0) => (A: Type) => transport needed (unit A)
+
+// def eq_nat: Decidable Nat := (a: Nat) => (b: Nat) => 
+
+// def zip (A: Type) (B: Type) (left: List A) (right: List B): (R: Type) -> (A -> B -> R -> R) -> R -> R := (R: Type) => (cons: A -> B -> R -> R) => nil

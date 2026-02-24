@@ -1,0 +1,6 @@
+
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+
+// Here Nat does not evaluate to a specific type immediatly and so we get a type error
+// a correct way would be a register 'reg' that stores the meaning of Nat, so 'reg "Nat"' would evaluate to the meaning of reg immediatly
+def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x

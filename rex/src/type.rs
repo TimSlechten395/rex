@@ -5,10 +5,11 @@ use functor_derive::Functor;
 use thiserror::Error;
 
 use crate::{
-    cache::{ExprId, SeaOfNodes},
-    data::expr::{Expr, ExprF, GExpr},
+    // cache::{ExprId, SeaOfNodes},
+    data::expr::{Builtin, Expr, ExprF, GExpr, VarKind},
     eval::{beta_reduce, normal_form, shift, weak_head_normal_form},
     helper::push_new,
+    pipeline::desugar::create_accessor,
 };
 
 #[derive(Debug, Error, Functor, Clone)]
@@ -30,21 +31,21 @@ pub enum TypeError<T> {
     NotAType(T),
 }
 
-pub fn err_with_nodes(err: TypeError<ExprId>, sea: &SeaOfNodes) -> Option<TypeError<Expr>> {
-    // let new = err.try_fmap(|e| sea.get_tree(e)?);
-    let new = match err {
-        TypeError::UnboundVariable(e, other) => TypeError::UnboundVariable(sea.get_tree(e)?, other),
-        TypeError::NotAFunction(e) => TypeError::NotAFunction(sea.get_tree(e)?),
-
-        TypeError::NotAType(e) => TypeError::NotAType(sea.get_tree(e)?),
-
-        TypeError::TypeMismatch { expected, found } => TypeError::TypeMismatch {
-            expected: sea.get_tree(expected)?,
-            found: sea.get_tree(found)?,
-        },
-    };
-    Some(new)
-}
+// pub fn err_with_nodes(err: TypeError<ExprId>, sea: &SeaOfNodes) -> Option<TypeError<Expr>> {
+//     // let new = err.try_fmap(|e| sea.get_tree(e)?);
+//     let new = match err {
+//         TypeError::UnboundVariable(e, other) => TypeError::UnboundVariable(sea.get_tree(e)?, other),
+//         TypeError::NotAFunction(e) => TypeError::NotAFunction(sea.get_tree(e)?),
+//
+//         TypeError::NotAType(e) => TypeError::NotAType(sea.get_tree(e)?),
+//
+//         TypeError::TypeMismatch { expected, found } => TypeError::TypeMismatch {
+//             expected: sea.get_tree(expected)?,
+//             found: sea.get_tree(found)?,
+//         },
+//     };
+//     Some(new)
+// }
 
 // Return the type for a term
 // we need vars_tys to resolve tys for the vars.
@@ -104,10 +105,59 @@ pub fn infer_type(
     expr: Expr,
 
     ctx: Vec<Expr>,
-    ty_errors: &mut Vec<TypeError<Vec<usize>>>,
+    ty_errors: &mut Vec<TypeError<(Expr, Vec<usize>)>>,
     loc: Vec<usize>,
-) -> Result<Expr, TypeError<Vec<usize>>> {
+) -> Result<Expr, TypeError<(Expr, Vec<usize>)>> {
     let ty: ExprF<_, _, _> = match expr.0 {
+        ExprF::Builtin(b) => match b {
+            Builtin::String(_) => ExprF::Builtin(Builtin::StringTy),
+            Builtin::StringTy => ExprF::Type,
+            Builtin::Num(_) => ExprF::Builtin(Builtin::NumTy),
+            Builtin::NumTy => ExprF::Type,
+            Builtin::Bool(_) => ExprF::Builtin(Builtin::BoolTy),
+            Builtin::BoolTy => ExprF::Type,
+            Builtin::StringCmp => ExprF::Pi {
+                name: "".to_string(),
+                param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::StringTy))),
+                ret_ty: Box::new(GExpr(ExprF::Pi {
+                    name: "".to_string(),
+                    param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::StringTy))),
+                    ret_ty: Box::new(GExpr(ExprF::Builtin(Builtin::BoolTy))),
+                })),
+            },
+            Builtin::NumCmp => ExprF::Pi {
+                name: "".to_string(),
+                param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::NumTy))),
+                ret_ty: Box::new(GExpr(ExprF::Pi {
+                    name: "".to_string(),
+                    param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::NumTy))),
+                    ret_ty: Box::new(GExpr(ExprF::Builtin(Builtin::BoolTy))),
+                })),
+            },
+            Builtin::BoolCmp => ExprF::Pi {
+                name: "".to_string(),
+                param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::BoolTy))),
+                ret_ty: Box::new(GExpr(ExprF::Pi {
+                    name: "".to_string(),
+                    param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::BoolTy))),
+                    ret_ty: Box::new(GExpr(ExprF::Builtin(Builtin::BoolTy))),
+                })),
+            },
+            // Builtin::Struct { map } => ExprF::Pi {
+            //     name: (),
+            //     param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::StringTy))),
+            //     // the return type is the item accessed by inferring the type
+            //     ret_ty: Box::new(GExpr(ExprF::Pi {
+            //         name: (),
+            //         param_ty: Box::new(GExpr(ExprF::Builtin(Builtin::StringTy))),
+            //         ret_ty: Box::new(GExpr(ExprF::App {
+            //             func: Box::new(GExpr(ExprF::Builtin(Builtin::Accessor))),
+            //             arg: Box::new(GExpr(ExprF::Var { idx: 0 as usize })),
+            //         })),
+            //     })),
+            // },
+            // Builtin::Accessor { .. } => ExprF::Type,
+        },
         // if the type is a variable search for it in context to determine the type
         ExprF::Var { idx } => {
             // just check if the variable has a type
@@ -116,7 +166,7 @@ pub fn infer_type(
             } else {
                 // We might need type variables here?
                 // This one probably cannot be recovered from
-                return Err(TypeError::UnboundVariable(loc, ctx.clone()));
+                return Err(TypeError::UnboundVariable((expr, loc), ctx.clone()));
             }
         }
 
@@ -137,10 +187,14 @@ pub fn infer_type(
                 } => {
                     let arg_ty = infer_type(*arg.clone(), ctx.clone(), ty_errors, loc1.clone())?;
 
-                    if !eq(*param_ty, arg_ty) {
+                    if !eq(*param_ty.clone(), arg_ty.clone()) {
+                        println!("----------");
+                        println!("left: {param_ty:?}");
+                        println!("right: {arg_ty:?}");
+                        println!("----------");
                         ty_errors.push(TypeError::TypeMismatch {
-                            expected: loc0.clone(),
-                            found: loc1.clone(),
+                            expected: (normal_form(*param_ty.clone()), loc0.clone()),
+                            found: (normal_form(arg_ty.clone()), loc1.clone()),
                         })
                     }
 
@@ -156,8 +210,8 @@ pub fn infer_type(
                     // }
                 }
                 other => {
-                    dbg!(other);
-                    return Err(TypeError::NotAFunction(loc0));
+                    // dbg!(other);
+                    return Err(TypeError::NotAFunction((func_ty_norm, loc0)));
                 }
             }
         }
@@ -172,8 +226,8 @@ pub fn infer_type(
                 push_new(loc.clone(), 0).clone(),
             )?;
 
-            if !eq(param_ty_ty, tyty.clone()) {
-                ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 0)));
+            if !eq(param_ty_ty.clone(), tyty.clone()) {
+                ty_errors.push(TypeError::NotAType((param_ty_ty, push_new(loc.clone(), 0))));
             }
 
             let ctx2 = extend_ctx(ctx, *param_ty.clone());
@@ -181,7 +235,7 @@ pub fn infer_type(
             let ret_ty = infer_type(*body, ctx2, ty_errors, push_new(loc.clone(), 1))?;
             // why do we normalize here?
             ExprF::Pi {
-                name: (),
+                name: "".to_string(),
                 param_ty: param_ty,
                 ret_ty: Box::new(ret_ty),
             }
@@ -201,15 +255,15 @@ pub fn infer_type(
             )?;
 
             if !eq(param_ty_ty.clone(), tyty.clone()) {
-                ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 0)));
+                ty_errors.push(TypeError::NotAType((param_ty_ty, push_new(loc.clone(), 0))));
             }
 
             let ctx2 = extend_ctx(ctx, *param_ty.clone());
 
             let ret_ty_ty = infer_type(*ret_ty.clone(), ctx2, ty_errors, push_new(loc.clone(), 1))?;
 
-            if !eq(ret_ty_ty, tyty.clone()) {
-                ty_errors.push(TypeError::NotAType(push_new(loc.clone(), 1)));
+            if !eq(ret_ty_ty.clone(), tyty.clone()) {
+                ty_errors.push(TypeError::NotAType((ret_ty_ty, push_new(loc.clone(), 1))));
             }
 
             tyty.0

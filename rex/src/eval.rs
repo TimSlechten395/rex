@@ -13,22 +13,28 @@ pub fn shift(expr: Expr, delta: isize, cutoff: usize) -> Expr {
                 ExprF::Var { idx }
             }
         }
-        ExprF::Lambda { param_ty, body, .. } => {
+        ExprF::Lambda {
+            param_ty,
+            body,
+            name,
+        } => {
             let param_ty = Box::new(shift(*param_ty, delta, cutoff));
             let body = Box::new(shift(*body, delta, cutoff + 1));
             ExprF::Lambda {
-                name: (),
+                name,
                 param_ty,
                 body,
             }
         }
         ExprF::Pi {
-            param_ty, ret_ty, ..
+            param_ty,
+            ret_ty,
+            name,
         } => {
             let param_ty = Box::new(shift(*param_ty, delta, cutoff));
             let ret_ty = Box::new(shift(*ret_ty, delta, cutoff + 1));
             ExprF::Pi {
-                name: (),
+                name,
                 param_ty,
                 ret_ty,
             }
@@ -54,13 +60,17 @@ pub fn subst(index: usize, body: Expr, arg: Expr) -> Expr {
             }
         }
         //
-        ExprF::Lambda { param_ty, body, .. } => {
+        ExprF::Lambda {
+            param_ty,
+            body,
+            name,
+        } => {
             // The only important part of this function
             let param_ty = Box::new(subst(index, *param_ty, arg.clone()));
             let arg_shifted = shift(arg, 1, 0);
             let body = Box::new(subst(index + 1, *body, arg_shifted));
             ExprF::Lambda {
-                name: (),
+                name,
                 param_ty,
                 body,
             }
@@ -78,7 +88,9 @@ pub fn subst(index: usize, body: Expr, arg: Expr) -> Expr {
             }
         }
         ExprF::Pi {
-            param_ty, ret_ty, ..
+            param_ty,
+            ret_ty,
+            name,
         } => {
             let param_ty = Box::new(subst(index, *param_ty, arg.clone()));
 
@@ -86,7 +98,7 @@ pub fn subst(index: usize, body: Expr, arg: Expr) -> Expr {
             let ret_ty = Box::new(subst(index + 1, *ret_ty, arg_shifted));
 
             ExprF::Pi {
-                name: (),
+                name,
                 param_ty,
                 ret_ty,
             }
@@ -124,22 +136,28 @@ pub fn weak_head_normal_form(expr: Expr) -> Expr {
 
 pub fn head_normal_form(expr: Expr) -> Expr {
     match expr.0 {
-        ExprF::Lambda { param_ty, body, .. } => {
+        ExprF::Lambda {
+            param_ty,
+            body,
+            name,
+        } => {
             let param_ty = Box::new(head_normal_form(*param_ty));
             let body = Box::new(head_normal_form(*body));
             GExpr(ExprF::Lambda {
-                name: (),
+                name,
                 param_ty,
                 body,
             })
         }
         ExprF::Pi {
-            param_ty, ret_ty, ..
+            param_ty,
+            ret_ty,
+            name,
         } => {
             let param_ty = Box::new(head_normal_form(*param_ty));
             let ret_ty = Box::new(head_normal_form(*ret_ty));
             GExpr(ExprF::Pi {
-                name: (),
+                name,
                 param_ty,
                 ret_ty,
             })
@@ -164,22 +182,28 @@ pub fn head_normal_form(expr: Expr) -> Expr {
 
 pub fn normal_form(expr: Expr) -> Expr {
     match expr.0 {
-        ExprF::Lambda { param_ty, body, .. } => {
+        ExprF::Lambda {
+            param_ty,
+            body,
+            name,
+        } => {
             let param_ty = Box::new(normal_form(*param_ty));
             let body = Box::new(normal_form(*body));
             GExpr(ExprF::Lambda {
-                name: (),
+                name,
                 param_ty,
                 body,
             })
         }
         ExprF::Pi {
-            param_ty, ret_ty, ..
+            param_ty,
+            ret_ty,
+            name,
         } => {
             let param_ty = Box::new(normal_form(*param_ty));
             let ret_ty = Box::new(normal_form(*ret_ty));
             GExpr(ExprF::Pi {
-                name: (),
+                name,
                 param_ty,
                 ret_ty,
             })

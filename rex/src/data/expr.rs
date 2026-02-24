@@ -1,5 +1,6 @@
 use core::fmt;
-use std::fmt::Debug;
+use std::collections::HashMap;
+use std::fmt::{Debug, write};
 use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
@@ -20,6 +21,27 @@ pub enum ExprF<T, A, B> {
     Lambda { name: B, param_ty: T, body: T },
     Pi { name: B, param_ty: T, ret_ty: T },
     Type,
+    Builtin(Builtin),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Builtin {
+    String(String),
+    StringTy,
+    // Struct {
+    //     map: HashMap<String, Box<ExprF<T, A, B>>>,
+    // },
+    // Accessor,
+    // {
+    //     map: HashMap<String, Box<ExprF<T, A, B>>>,
+    // },
+    Num(usize),
+    NumTy,
+    Bool(bool),
+    BoolTy,
+    StringCmp,
+    NumCmp,
+    BoolCmp,
 }
 
 // Experimental: allow annotations everywhere and use them to derive missing types
@@ -75,6 +97,7 @@ fn convert<A: Clone, B: Clone>(ann_expr: AnnExpr<A, B>) -> Option<GExpr<A, B>> {
             }
 
             ExprF::Type => todo!(),
+            ExprF::Builtin(_) => todo!(),
         },
         AnnExprF::Ann(expr, ty) => todo!(),
     }
@@ -84,6 +107,7 @@ fn convert<A: Clone, B: Clone>(ann_expr: AnnExpr<A, B>) -> Option<GExpr<A, B>> {
 impl Display for NamedExpr {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.0 {
+            ExprF::Builtin(s) => write!(f, "\"{s:?}\""),
             ExprF::Var { idx } => write!(f, "{idx}"),
             ExprF::Type => write!(f, "Type"),
 
@@ -127,7 +151,7 @@ impl<T, A, B> ExprF<T, A, B> {
             ExprF::Pi {
                 param_ty, ret_ty, ..
             } => f(f(init, param_ty), ret_ty),
-            ExprF::Type => init,
+            ExprF::Type | ExprF::Builtin(_) => init,
         }
     }
 }
@@ -135,7 +159,8 @@ impl<T, A, B> ExprF<T, A, B> {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GExpr<A, B>(pub ExprF<Box<GExpr<A, B>>, A, B>);
 
-pub type Expr = GExpr<usize, ()>;
+// The string here is for the name hint
+pub type Expr = GExpr<usize, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VarKind<A, B> {
@@ -161,7 +186,7 @@ impl Display for VarKind<String, usize> {
     }
 }
 
-pub type NamedExpr = GExpr<VarKind<String, usize>, VarKind<String, ()>>;
+pub type NamedExpr = GExpr<VarKind<String, usize>, VarKind<String, String>>;
 
 impl<A: Debug + Clone, B: Debug + Clone> Traverse for GExpr<A, B> {
     type Span = Vec<usize>;
@@ -170,6 +195,9 @@ impl<A: Debug + Clone, B: Debug + Clone> Traverse for GExpr<A, B> {
         let current = path.next();
         match current {
             Some(cur) => match self.0.clone() {
+                ExprF::Builtin(..) => {
+                    bail!("invalid path in {:?}", &self.0)
+                }
                 ExprF::Var { .. } => {
                     bail!("invalid path in {:?}", &self.0)
                 }
@@ -235,7 +263,7 @@ pub enum ExprError<T> {
     ArbitraryAnn(T),
 }
 
-pub type SpannedNamedExpr = SpannedExpr<VarKind<String, usize>, VarKind<String, ()>>;
+pub type SpannedNamedExpr = SpannedExpr<VarKind<String, usize>, VarKind<String, String>>;
 
 // impl<A, B> Compile for SpannedExpr<A, B>
 
@@ -279,7 +307,7 @@ impl<A: Debug + Clone, B: Debug + Clone> Traverse for SpannedExpr<A, B> {
 
         match current {
             Some(cur) => match self.0.0.clone() {
-                ExprF::Var { .. } | ExprF::Type => Err(err),
+                ExprF::Var { .. } | ExprF::Type | ExprF::Builtin(_) => Err(err),
                 ExprF::App { func, arg } => match cur {
                     0 => func.traverse(path.collect()),
                     1 => arg.traverse(path.collect()),

@@ -15,11 +15,11 @@ def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
 // this looks nice but does not work because it uses n as a lambda while Nat is just a type variable "def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)"
 // We could allow syntactic sugar so that Nat gets replaced with its value immediatly without type checking the application
 
-def succ : Nat -> Nat := (n: (A: Type) -> (A -> A) -> A -> A) => (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
 
-def add: Nat -> Nat -> Nat := (m: (A: Type) -> (A -> A) -> A -> A) => (n: (A: Type) -> (A -> A) -> A -> A) => (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
-def mul: Nat -> Nat -> Nat := (m: (A: Type) -> (A -> A) -> A -> A) => (n: (A: Type) -> (A -> A) -> A -> A) => (A: Type) => (f: A -> A) => (x: A) => m A (n A f) x
-def exp: Nat -> Nat -> Nat := (m: (A: Type) -> (A -> A) -> A -> A) => (n: (A: Type) -> (A -> A) -> A -> A) => (A: Type) => (f: A -> A) => (x: A) => n (A -> A) (m A) f x
+def add (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
+def mul (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A (n A f) x
+def exp (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => n (A -> A) (m A) f x
 
 // Booleans (not to be confused with bottom and top)
 def Bool: Type := (A: Type) -> A -> A -> A
@@ -34,7 +34,7 @@ def pair (A: Type) (B: Type) (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B 
 def Sigma (A: Type) (B: A -> Type): Type := (C: Type) -> ((a: A) -> B a -> C) -> C
 def sigma (A: Type) (B: A -> Type) (a: A) (b: B a): Sigma A B := (C: Type) => (f: (a: A) -> B a -> C) => f a b
 
-// this is the default sigma since it allows us to name the previous fields in the next one
+// this sigma is interesting since it allows us to name the previous fields in the next one
 // def sigma (A: Type) (B: A -> Type) (a: A) (b: A -> B a): Sigma A B := (C: Type) => (f: (a: A) -> B a -> C) => f a (b a)
 
 // These are the projections
@@ -52,9 +52,9 @@ def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
 def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
 
 // Pointwise equality
-def Equiv (A: Type) (B: Type) (f: A -> B) (g: A -> B) : Type := (a: A) -> Eq B (f a) (g a)
+def Equiv (A: Type) (B: Type) (f: A -> B) (g: A -> B): Type := (a: A) -> Eq B (f a) (g a)
 // A function is pointwise equal to itself
-def equiv_refl (A: Type) (B: Type) (f: A -> B) : Equiv A B f f := (a: A) => refl B (f a)
+def equiv_refl (A: Type) (B: Type) (f: A -> B): Equiv A B f f := (a: A) => refl B (f a)
 
 def InverseLeft (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
     (x: A) -> Eq A (g (f x)) x
@@ -65,24 +65,27 @@ def InverseRight (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
 def Inverse (A: Type) (B: Type) (f: A -> B) (g: B -> A): Type :=
     Pair ((x: A) -> Eq A (g (f x)) x) ((y: B) -> Eq B (f (g y)) y)
 
-// def Int: Type := (X: Type) -> (x: X) -> (f: X -> X) -> (g: X -> X) -> (p: Inverse X X f g) -> X
-// def int_zero: Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => x
+def Int: Type := (X: Type) -> (x: X) -> (f: X -> X) -> (g: X -> X) -> (p: Inverse X X f g) -> X
+def int_zero: Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => x
 
 // these two have the same problem as the natural numbers where you cannot use n as what you want
-// def int_succ (n: Int): Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => f (n X x f g p)
-// def int_pred (n: Int): Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => g (n X x f g p)
+def int_succ (n: Int): Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => f (n X x f g p)
+def int_pred (n: Int): Int := (X: Type) => (x: X) => (f: X -> X) => (g: X -> X) => (p: Inverse X X f g) => g (n X x f g p)
 
 // U8 definition (built on Nats)
-def two: Nat := succ succ zero
-def eight: Nat := succ succ succ succ succ succ succ succ zero
+def two: Nat := succ (succ zero)
+def eight: Nat := succ (succ (succ (succ (succ (succ (succ (succ zero)))))))
 def pow_2_8: Nat := exp two eight
+
+def one_and_one_is_two: Eq Nat (add (succ zero) (succ zero)) (succ (succ zero)) := refl Nat (succ (succ zero))
 
 // def U8: Type := (A: Type) => (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x)) => A
 // def u8_zero: U8 := (A: Type) => (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x) x) => x
-//def u8_succ (n: U8): U8 := (A: Type) => (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x) x) => f (n A f x p)
+// def u8_succ (n: U8): U8 := (A: Type) => (f: A -> A) => (x: A) => (p: Eq (pow_2_8 A f x) x) => f (n A f x p)
 
 // def Y_combinator (A: Type) (f: A -> A) : A :=
 // ((x: (X: Type) -> X -> A) => f (x ((X: Type) -> X -> A) x))
 // ((x: (X: Type) -> X -> A) => f (x x))
+
 
 

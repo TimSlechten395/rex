@@ -1,0 +1,22 @@
+
+def Never: Type := (A: Type) -> A
+
+def unit (A: Type) (x: A) : A := x
+
+def Bool: Type := (R: Type) -> R -> R -> R
+
+def t: Bool := (R: Type) => (t: R) => (f: R) => t
+def f: Bool := (R: Type) => (t: R) => (f: R) => f
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+def is_true (b: Bool) => Eq A x x
+
+def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
+def left (A: Type) (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
+def right (A: Type) (B: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
+
+def Decidable (A: Type): Type := (a: A) -> (b: A) -> Either (Eq A a b) (Eq A a b -> Never)
+

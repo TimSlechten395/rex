@@ -1,3 +1,6 @@
+/// We use a special parsing technique optimized for error handling and parallellization
+/// The idea is as follows: identify the most important tokens and these can either create a new
+/// token or split the whole tokentree
 use std::ops::Range;
 
 use crate::{
@@ -12,11 +15,11 @@ pub struct Parser;
 
 impl Compile for Parser {
     type Input = Vec<Token<AbsoluteIndent>>;
-    type Output = SpannedFixAst;
+    type Output = Vec<SpannedFixAst>;
     type Error = AstError<SpannedResultAst>;
 
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
-        get_fix_ast(parse(input))
+        parse(input).into_iter().map(get_fix_ast).collect()
     }
 }
 
@@ -34,60 +37,33 @@ enum TokenTree {
 pub type Spanned<T> = (T, Range<usize>);
 
 // NOTE: our span is range_inclusive
-pub fn parse(tokens: Vec<Token<AbsoluteIndent>>) -> SpannedResultAst {
+pub fn parse(tokens: Vec<Token<AbsoluteIndent>>) -> Vec<SpannedResultAst> {
     let end = tokens.len();
 
     // indentation should be important
-    let ignore_new_lines = tokens
-        .into_iter()
-        .enumerate()
-        .filter(|x| {
-            if let Token::Newline(AbsoluteIndent(_)) = x.1 {
-                false
-            } else {
-                true
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut ignore_new_lines = tokens.into_iter().enumerate().filter(|x| {
+        if let Token::Newline(AbsoluteIndent(_)) = x.1 {
+            false
+        } else {
+            true
+        }
+    });
 
     // if there is one that starts with def we name resolve
-    let items = ignore_new_lines.split(|x| if let Token::Def = x.1 { true } else { false });
-
-    let is_mod = &items.clone().next().is_some_and(|x| x.is_empty());
-
-    let mut items = items.filter(|x| !x.is_empty());
-
-    // if its a list of definitions is a module else it depends
-    let ast = if *is_mod {
-        Ast::Module(
-            Vec::new(),
-            items
-                .map(|x| parse_assign(&parse_group_start(&mut x.to_vec().into_iter())))
-                .collect(),
-        )
-    } else {
-        match items.clone().count() {
-            0 => Ast::Unit,
-            1 => {
-                return parse_assign(&parse_group_start(
-                    &mut items.next().unwrap().to_vec().into_iter(),
-                ));
-            }
-            _ => Ast::Sigma(
-                items
-                    .map(|x| parse_assign(&parse_group_start(&mut x.to_vec().into_iter())))
-                    .collect(),
-            ),
-        }
+    //
+    match ignore_new_lines.next() {
+        Some((_, Token::Def)) => {}
+        Some(n) => return vec![SpannedResultAst((Err(AstError::InvalidToken(n.1)), 0..0))],
+        None => return Vec::new(),
     };
 
-    SpannedResultAst((
-        Ok(ast),
-        Range {
-            start: 0,
-            end: end - 1,
-        },
-    ))
+    let items = ignore_new_lines.collect::<Vec<_>>();
+
+    let items = items.split(|x| if let Token::Def = x.1 { true } else { false });
+
+    items
+        .map(|x| parse_assign(&parse_group_start(&mut x.to_vec().into_iter())))
+        .collect()
 }
 
 fn get_span_from_tree(tokens: &[Spanned<TokenTree>]) -> Range<usize> {

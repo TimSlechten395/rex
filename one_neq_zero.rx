@@ -1,0 +1,17 @@
+def Never: Type := (A: Type) -> A
+
+def unit (A: Type) (x: A) : A := x
+
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+
+def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+def Pi (A: Type) (B: Type) := A -> B
+
+def needed (n: Nat): Type := (Q: Type) -> n Type (Pi Q) Q
+
+def one_neq_zero: Eq Nat 1 0 -> Never := (transport: (P: Nat -> Type) -> P 1 -> P 0) => transport needed unit

@@ -2,7 +2,8 @@ use functor_derive::Functor;
 
 use crate::{
     Compile,
-    data::expr::{Expr, ExprF, GExpr, NamedExpr, VarKind},
+    data::expr::{Builtin, Expr, ExprF, GExpr, NamedExpr, VarKind},
+    def::Defs,
     helper::push_new,
 };
 
@@ -20,7 +21,8 @@ impl Compile for NameResolver {
     }
 }
 
-pub type Context = Vec<VarKind<String, ()>>;
+// TODO: Do we need to keep VarKind<String, String> because names are only relevant for the other option?
+pub type Context = Vec<VarKind<String, String>>;
 
 pub fn resolve(name: String, ctx: &mut Context) -> Option<usize> {
     ctx.iter()
@@ -62,9 +64,14 @@ pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Con
                 body,
             } => {
                 let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0))?);
-                env.push(name);
+                env.push(name.clone());
+
+                let name = match name {
+                    VarKind::Named(s) => s,
+                    VarKind::Idx(s) => s,
+                };
                 let res = ExprF::Lambda {
-                    name: (),
+                    name,
                     param_ty,
                     body: Box::new(go(*body, env, push_new(loc.clone(), 1))?),
                 };
@@ -77,16 +84,22 @@ pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Con
                 ret_ty,
             } => {
                 let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0))?);
-                env.push(name);
+                env.push(name.clone());
+
+                let name = match name {
+                    VarKind::Named(s) => s,
+                    VarKind::Idx(s) => s,
+                };
                 let res = ExprF::Pi {
-                    name: (),
+                    name,
                     param_ty,
-                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc, 1))?),
+                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc.clone(), 1))?),
                 };
                 env.pop();
                 res
             }
             ExprF::Type => ExprF::Type,
+            ExprF::Builtin(s) => ExprF::Builtin(s),
         };
         Ok(GExpr(expr))
     }

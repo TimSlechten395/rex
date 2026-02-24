@@ -26,8 +26,8 @@ pub enum Ast<T> {
     Lit(LitKind),
     Dot(Vec<T>),
 
-    Ann(Vec<T>),
-    Binding(Vec<T>),
+    Ann(Vec<T>),     // ':'
+    Binding(Vec<T>), // '='
 
     Group(Box<T>),
 
@@ -36,7 +36,7 @@ pub enum Ast<T> {
     // pub/priv is done with an extra module that just takes the full module and returns a smaller
     // module
     // always depends one self
-    Module(Vec<T>, Vec<T>),
+    // Module(Vec<T>, Vec<T>),
 
     // Multi-argument Lambda (sugar for nested single-arg lambdas)
     // Example: `(lambda (x:T) (y:U) body)`
@@ -75,14 +75,13 @@ impl<T: Display> Display for Ast<T> {
             Lambda(exprs) => join_fmt(f, exprs, " => "),
             Pipe(exprs) => join_fmt(f, exprs, " |> "),
             Group(expr) => write!(f, "({expr})"),
-
-            Module(deps, items) => {
-                write!(f, "module(deps=[")?;
-                join_fmt(f, deps, "\n")?;
-                write!(f, "], items=[\n def ")?;
-                join_fmt(f, items, "\n def ")?;
-                write!(f, "]")
-            }
+            // Module(deps, items) => {
+            //     write!(f, "module(deps=[")?;
+            //     join_fmt(f, deps, "\n")?;
+            //     write!(f, "], items=[\n def ")?;
+            //     join_fmt(f, items, "\n def ")?;
+            //     write!(f, "]")
+            // }
         }
     }
 }
@@ -130,11 +129,10 @@ impl<T: Clone> Ast<T> {
             | Ast::Tuple(items)
             | Ast::Sigma(items)
             | Ast::Pipe(items) => items.clone().into_iter().fold(init, f.clone()),
-
-            Ast::Module(items1, items2, ..) => items2
-                .clone()
-                .into_iter()
-                .fold(items1.clone().into_iter().fold(init, f.clone()), f.clone()),
+            // Ast::Module(items1, items2, ..) => items2
+            //     .clone()
+            //     .into_iter()
+            //     .fold(items1.clone().into_iter().fold(init, f.clone()), f.clone()),
         }
     }
 }
@@ -185,7 +183,7 @@ impl Traverse for SpannedFixAst {
                 Unit | Var(_) | Type | Lit(_) => bail!("invalid path in {:?}", &self.0.0),
                 Group(e) => match cur {
                     0 => e.traverse(path.collect()),
-                    _ => bail!("invalid path in {:?}", &self.0.0),
+                    _ => bail!("invalid path in {:?}, cur: {:?} ", &self.0.0, cur),
                 },
 
                 Tuple(items) | Sigma(items) | App(items) | Ann(items) | Binding(items)
@@ -193,49 +191,52 @@ impl Traverse for SpannedFixAst {
                     if let Some(param) = items.get(cur) {
                         param.clone().traverse(path.collect())
                     } else {
-                        bail!("invalid path in {:?}", &self.0.0)
+                        bail!(
+                            "invalid path in {:?}, cur: {:?}, max: {:?}",
+                            &self.0.0,
+                            cur,
+                            items.len()
+                        )
                     }
-                }
-                // SugarExpr::LetIn(_, ty, val, body) => match cur {
-                //     0 => ty.traverse(path),
-                //     1 => val.traverse(path),
-                //     2 => body.traverse(path),
-                //     _ => bail!("invalid path"),
-                // },
-                Module(items1, items2, ..) => match cur {
-                    0 => {
-                        let cur = match path.next() {
-                            Some(ok) => ok,
-                            None => return Ok(Box::new(self)),
-                        };
-                        if let Some(param) = items1.get(cur) {
-                            param.clone().traverse(path.collect())
-                        } else {
-                            bail!(
-                                "pointed to mod dep {} but mod has only {} deps",
-                                cur,
-                                items1.len()
-                            )
-                        }
-                    }
-                    1 => {
-                        let cur = match path.next() {
-                            Some(ok) => ok,
-                            None => return Ok(Box::new(self)),
-                        };
-
-                        if let Some(param) = items2.get(cur) {
-                            param.clone().traverse(path.collect())
-                        } else {
-                            bail!(
-                                "pointed to mod item {} but mod has only {} items",
-                                cur,
-                                items2.len()
-                            )
-                        }
-                    }
-                    _ => bail!("invalid path in mod"),
-                },
+                } // SugarExpr::LetIn(_, ty, val, body) => match cur {
+                  //     0 => ty.traverse(path),
+                  //     1 => val.traverse(path),
+                  //     2 => body.traverse(path),
+                  //     _ => bail!("invalid path"),
+                  // },
+                  // Module(items1, items2, ..) => match cur { 0 => {
+                  //         let cur = match path.next() {
+                  //             Some(ok) => ok,
+                  //             None => return Ok(Box::new(self)),
+                  //         };
+                  //         if let Some(param) = items1.get(cur) {
+                  //             param.clone().traverse(path.collect())
+                  //         } else {
+                  //             bail!(
+                  //                 "pointed to mod dep {} but mod has only {} deps",
+                  //                 cur,
+                  //                 items1.len()
+                  //             )
+                  //         }
+                  //     }
+                  //     1 => {
+                  //         let cur = match path.next() {
+                  //             Some(ok) => ok,
+                  //             None => return Ok(Box::new(self)),
+                  //         };
+                  //
+                  //         if let Some(param) = items2.get(cur) {
+                  //             param.clone().traverse(path.collect())
+                  //         } else {
+                  //             bail!(
+                  //                 "pointed to mod item {} but mod has only {} items",
+                  //                 cur,
+                  //                 items2.len()
+                  //             )
+                  //         }
+                  //     }
+                  //     _ => bail!("invalid path in mod"),
+                  // },
             },
 
             None => Ok(Box::new(self)),

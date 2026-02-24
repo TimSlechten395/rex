@@ -1,6 +1,6 @@
 // use previous compiler for bootstrapping
 
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::fs;
@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 use crate::data::expr::Expr;
 
-const PREV_COMPILER: LazyCell<PathBuf> = LazyCell::new(|| {
+static PREV_COMPILER: LazyLock<PathBuf> = LazyLock::new(|| {
     let conf = read_kv_file("BOOTSTRAP.txt").unwrap();
     let version = conf
         .get("min_version")
@@ -23,7 +23,7 @@ const PREV_COMPILER: LazyCell<PathBuf> = LazyCell::new(|| {
 });
 
 fn read_kv_file(path: &str) -> anyhow::Result<HashMap<String, String>> {
-    let contents = fs::read_to_string(path)?;
+    let contents = fs::read_to_string(path).context(format!("failed to read {}", path))?;
     let mut map = HashMap::new();
 
     for line in contents.lines() {
@@ -40,17 +40,20 @@ fn read_kv_file(path: &str) -> anyhow::Result<HashMap<String, String>> {
     Ok(map)
 }
 
-fn compile_min_version(code: &str) -> anyhow::Result<Expr> {
-    let output = std::process::Command::new(&LazyCell::force(&PREV_COMPILER))
+pub fn compile_min_version(code: &str) -> anyhow::Result<Vec<(String, Expr)>> {
+    let output = std::process::Command::new(&LazyLock::force(&PREV_COMPILER))
+        .arg("run")
+        .arg("-b")
         .arg(code)
         .output()
         .expect("Failed to exec command");
 
     if output.status.success() {
-        let expr = serde_json::from_slice::<Expr>(&output.stdout)?;
+        let expr = serde_json::from_slice::<Vec<(String, Expr)>>(&output.stdout)
+            .context("could not parse json")?;
         Ok(expr)
     } else {
-        let err = String::from_utf8_lossy(&output.stdout).to_string();
-        bail!(err)
+        let err = String::from_utf8_lossy(&output.stderr).to_string();
+        bail!("bootstrap compiler crashed \nB: {}", err)
     }
 }
