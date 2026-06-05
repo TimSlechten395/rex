@@ -30,6 +30,9 @@ def false: Bool := (A: Type) => (t: A) => (f: A) => f
 def Pair (A: Type) (B: Type): Type := (C: Type) -> (A -> B -> C) -> C
 def pair (A: Type) (B: Type) (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B -> C) => f a b
 
+// R should be the type of one level up
+def Zipper: Type := (T: Type) => (R: Type) => Pair T (T -> R)
+
 // note: Sigma A (_ => B) = Pair A B
 def Sigma (A: Type) (B: A -> Type): Type := (C: Type) -> ((a: A) -> B a -> C) -> C
 def sigma (A: Type) (B: A -> Type) (a: A) (b: B a): Sigma A B := (C: Type) => (f: (a: A) -> B a -> C) => f a b

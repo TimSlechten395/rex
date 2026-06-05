@@ -28,7 +28,7 @@ impl Compile for NameResolver {
                     let just_defs = defs
                         .clone()
                         .into_iter()
-                        .map(|GDef { name, ty: _, val }| (name, val))
+                        .map(|GDef { name, ty: _, val }| (name.0, val))
                         .collect();
                     let val = replace_defs(val, &just_defs);
                     let ty = ty.map(|x| replace_defs(x, &just_defs));
@@ -92,17 +92,17 @@ pub fn to_indices(expr: SpannedNamedExpr) -> SpannedExpr {
                 param_ty,
                 body,
             } => {
-                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0)));
-                env.push(name.clone());
+                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 1)));
+                env.push(name.0.clone());
 
-                let name = match name {
+                let new_name = match name.0 {
                     VarKind::Named(s) => s,
                     VarKind::Idx(s) => s,
                 };
                 let res = ExprF::Lambda {
-                    name,
+                    name: (new_name, name.1),
                     param_ty,
-                    body: Box::new(go(*body, env, push_new(loc.clone(), 1))),
+                    body: Box::new(go(*body, env, push_new(loc.clone(), 2))),
                 };
                 env.pop();
                 res
@@ -112,17 +112,17 @@ pub fn to_indices(expr: SpannedNamedExpr) -> SpannedExpr {
                 param_ty,
                 ret_ty,
             } => {
-                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0)));
-                env.push(name.clone());
+                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 1)));
+                env.push(name.0.clone());
 
-                let name = match name {
+                let new_name = match name.0 {
                     VarKind::Named(s) => s,
                     VarKind::Idx(s) => s,
                 };
                 let res = ExprF::Pi {
-                    name,
+                    name: (new_name, name.1),
                     param_ty,
-                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc.clone(), 1))),
+                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc.clone(), 2))),
                 };
                 env.pop();
                 res

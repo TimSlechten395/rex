@@ -34,7 +34,7 @@ pub async fn completion(
             let ty = x.ty.map(|x| print_named_expr(x.remove_span()));
 
             CompletionItem {
-                label: name,
+                label: name.0,
                 kind: Some(CompletionItemKind::VARIABLE),
                 detail: ty,
                 documentation: None,

@@ -244,7 +244,10 @@ where
 {
     let mut inner = Vec::new();
 
+    let mut last = start;
+
     while let Some((i, tok)) = iter.next() {
+        last = i;
         match tok {
             ValidToken::LParen => {
                 let group = parse_group_end(iter, i);
@@ -254,5 +257,5 @@ where
             _ => inner.push((TokenTree::Leaf(tok), i..=i)),
         }
     }
-    panic!("unterminated paren group")
+    (TokenTree::Group(inner), start..=last)
 }

@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use anyhow::bail;
+use either::Either::{self, Left, Right};
 use functor_derive::Functor;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -185,52 +186,52 @@ impl<A: Display, B: Display> Display for VarKind<A, B> {
 
 pub type NamedExpr = GExpr<VarKind<String, usize>, VarKind<String, String>, Vec<usize>>;
 
-impl<A: Debug + Clone, B: Debug + Clone, E: Debug + Clone> Traverse for GExpr<A, B, E> {
-    type Span = Vec<usize>;
-    fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
-        let mut path = path.into_iter();
-        let current = path.next();
-        match current {
-            Some(cur) => match self.0.clone() {
-                ExprF::Builtin(..) => {
-                    bail!("invalid path in {:?}", cur)
-                }
-                ExprF::Var { .. } => {
-                    bail!("invalid path in {:?}", cur)
-                }
-                ExprF::App { func, arg } => match cur {
-                    0 => func.traverse(path.collect()),
-                    1 => arg.traverse(path.collect()),
-                    n => bail!("invalid path in {:?}", n),
-                },
-                ExprF::Lambda { param_ty, body, .. } => match cur {
-                    0 => param_ty.traverse(path.collect()),
-                    1 => body.traverse(path.collect()),
-                    n => bail!("invalid path in {:?}", n),
-                },
-                ExprF::Pi {
-                    param_ty, ret_ty, ..
-                } => match cur {
-                    0 => param_ty.traverse(path.collect()),
-                    1 => ret_ty.traverse(path.collect()),
-                    _ => bail!("invalid path in {:?}", cur),
-                },
-                ExprF::Err(_, e) => e
-                    .get(cur)
-                    .ok_or_else(|| anyhow!("invalid path in {:?}", cur))
-                    .and_then(|x| x.clone().traverse(path.collect())),
-                ExprF::Type => bail!("invalid path in {:?}", cur),
-            },
-
-            None => Ok(Box::new(self)),
-        }
-    }
-}
+// impl<A: Debug + Clone, B: Debug + Clone, E: Debug + Clone> Traverse for GExpr<A, B, E> {
+//     type Span = Vec<usize>;
+//     fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
+//         let mut path = path.into_iter();
+//         let current = path.next();
+//         match current {
+//             Some(cur) => match self.0.clone() {
+//                 ExprF::Builtin(..) => {
+//                     bail!("invalid path in {:?}", cur)
+//                 }
+//                 ExprF::Var { .. } => {
+//                     bail!("invalid path in {:?}", cur)
+//                 }
+//                 ExprF::App { func, arg } => match cur {
+//                     0 => func.traverse(path.collect()),
+//                     1 => arg.traverse(path.collect()),
+//                     n => bail!("invalid path in {:?}", n),
+//                 },
+//                 ExprF::Lambda { param_ty, body, .. } => match cur {
+//                     0 => param_ty.traverse(path.collect()),
+//                     1 => body.traverse(path.collect()),
+//                     n => bail!("invalid path in {:?}", n),
+//                 },
+//                 ExprF::Pi {
+//                     param_ty, ret_ty, ..
+//                 } => match cur {
+//                     0 => param_ty.traverse(path.collect()),
+//                     1 => ret_ty.traverse(path.collect()),
+//                     _ => bail!("invalid path in {:?}", cur),
+//                 },
+//                 ExprF::Err(_, e) => e
+//                     .get(cur)
+//                     .ok_or_else(|| anyhow!("invalid path in {:?}", cur))
+//                     .and_then(|x| x.clone().traverse(path.collect())),
+//                 ExprF::Type => bail!("invalid path in {:?}", cur),
+//             },
+//
+//             None => Ok(Box::new(self)),
+//         }
+//     }
+// }
 
 pub type Spanned<T> = (T, Vec<usize>);
 
 #[derive(Debug, Clone)]
-pub struct SpannedGExpr<A, B, E>(pub Spanned<ExprF<Box<SpannedGExpr<A, B, E>>, A, B, E>>);
+pub struct SpannedGExpr<A, B, E>(pub Spanned<ExprF<Box<SpannedGExpr<A, B, E>>, A, Spanned<B>, E>>);
 
 pub type SpannedExpr = SpannedGExpr<usize, String, Vec<usize>>;
 pub type SpannedNamedExpr =
@@ -238,7 +239,7 @@ pub type SpannedNamedExpr =
 
 #[derive(Debug, Clone)]
 pub struct GDef<A, B, E> {
-    pub name: String,
+    pub name: Spanned<String>,
     pub ty: Option<SpannedGExpr<A, B, E>>,
     pub val: SpannedGExpr<A, B, E>,
 }
@@ -294,11 +295,14 @@ pub fn search_defs(expr: NamedDefs, loc: Vec<usize>) -> Vec<Vec<usize>> {
         .into_iter()
         .enumerate()
         .map(|(i, expr)| {
+            if loc.clone() == expr.name.1 {
+                return vec![vec![i, 0]];
+            }
             let mut ty = expr
                 .ty
-                .map(|ty| search(ty, loc.clone(), vec![i, 0]))
+                .map(|ty| search(ty, loc.clone(), vec![i, 1]))
                 .unwrap_or(vec![]);
-            let val = search(expr.val, loc.clone(), vec![i, 1]);
+            let val = search(expr.val, loc.clone(), vec![i, 2]);
             ty.extend(val);
             ty
         })
@@ -322,19 +326,26 @@ pub fn search<A: Clone + Debug, B: Clone + Debug, E: Clone + Debug>(
                 App {
                     func: one,
                     arg: two,
-                }
-                | Lambda {
-                    name: _,
-                    param_ty: one,
-                    body: two,
-                }
-                | Pi {
-                    name: _,
-                    param_ty: one,
-                    ret_ty: two,
                 } => {
                     let mut ret = search(*one, loc.clone(), push_new(cur_loc.clone(), 0));
                     ret.extend(search(*two, loc.clone(), push_new(cur_loc.clone(), 1)));
+                    ret
+                }
+                Lambda {
+                    name: one,
+                    param_ty: two,
+                    body: three,
+                }
+                | Pi {
+                    name: one,
+                    param_ty: two,
+                    ret_ty: three,
+                } => {
+                    let mut ret = search(*two, loc.clone(), push_new(cur_loc.clone(), 1));
+                    ret.extend(search(*three, loc.clone(), push_new(cur_loc.clone(), 2)));
+                    if loc == one.1 {
+                        ret.push(push_new(cur_loc.clone(), 0));
+                    }
                     ret
                 }
                 Err(_, items) => iter_with_loc(items, cur_loc.clone())
@@ -345,9 +356,10 @@ pub fn search<A: Clone + Debug, B: Clone + Debug, E: Clone + Debug>(
                     })
                     .unwrap_or(Vec::new()),
             };
-            if ret.is_empty() {
-                ret.push(cur_loc);
-            }
+            // TODO: for now only exact matches count
+            // if ret.is_empty() {
+            //     ret.push(cur_loc);
+            // }
             ret
         }
     } else {
@@ -385,12 +397,40 @@ impl<A, B, E> SpannedGExpr<A, B, E> {
     // }
 
     pub fn remove_span(self) -> GExpr<A, B, E> {
-        let expr = self.0.0.fmap(|e| Box::new(e.remove_span()));
+        let expr = match self.0.0 {
+            ExprF::Var { idx } => ExprF::Var { idx },
+            ExprF::App { func, arg } => ExprF::App { func, arg },
+            ExprF::Lambda {
+                name,
+                param_ty,
+                body,
+            } => ExprF::Lambda {
+                name: name.0,
+                param_ty,
+                body,
+            },
+            ExprF::Pi {
+                name,
+                param_ty,
+                ret_ty,
+            } => ExprF::Pi {
+                name: name.0,
+                param_ty,
+                ret_ty,
+            },
+            ExprF::Type => ExprF::Type,
+            ExprF::Builtin(builtin) => ExprF::Builtin(builtin),
+            ExprF::Err(expr_error, items) => ExprF::Err(expr_error, items),
+        };
+        let expr = expr.fmap(|e| Box::new(e.remove_span()));
         GExpr(expr)
     }
 }
 
-pub fn traverse_defs(expr: NamedDefs, path: Vec<usize>) -> anyhow::Result<Box<SpannedNamedExpr>> {
+pub fn traverse_defs(
+    expr: NamedDefs,
+    path: Vec<usize>,
+) -> anyhow::Result<either::Either<SpannedNamedExpr, Spanned<String>>> {
     let mut iter = path.into_iter();
     let Some(next) = iter.next() else {
         bail!("path was completely empty")
@@ -403,20 +443,22 @@ pub fn traverse_defs(expr: NamedDefs, path: Vec<usize>) -> anyhow::Result<Box<Sp
         bail!("did not specify which part of def")
     };
     let remaining = iter.collect();
-    match next {
-        0 => expr
+    let ret = match next {
+        0 => Either::Right(expr.name.clone()),
+        1 => expr
             .ty
             .clone()
             .ok_or(anyhow!("no type for this annotation"))?
-            .traverse(remaining),
-        1 => expr.val.clone().traverse(remaining),
+            .traverse(remaining)?,
+
+        2 => expr.val.clone().traverse(remaining)?,
         _ => bail!("pointed to def, but def was not available"),
-    }
+    };
+    Ok(ret)
 }
 
-impl<A: Debug + Clone, B: Debug + Clone, E: Debug + Clone> Traverse for SpannedGExpr<A, B, E> {
-    type Span = Vec<usize>;
-    fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
+impl<A: Debug + Clone, B: Debug + Clone + ToString, E: Debug + Clone> SpannedGExpr<A, B, E> {
+    fn traverse(self, path: Vec<usize>) -> anyhow::Result<Either<Self, Spanned<String>>> {
         let mut path = path.into_iter();
 
         let s = format!("{:?}", &self.0.0);
@@ -436,16 +478,30 @@ impl<A: Debug + Clone, B: Debug + Clone, E: Debug + Clone> Traverse for SpannedG
                     1 => arg.traverse(path.collect()),
                     _ => Err(err),
                 },
-                ExprF::Lambda { param_ty, body, .. } => match cur {
-                    0 => param_ty.traverse(path.collect()),
-                    1 => body.traverse(path.collect()),
+                ExprF::Lambda {
+                    name,
+                    param_ty,
+                    body,
+                } => match cur {
+                    0 => {
+                        let name = (name.0.to_string(), name.1);
+                        Ok(Right(name))
+                    }
+                    1 => param_ty.traverse(path.collect()),
+                    2 => body.traverse(path.collect()),
                     _ => Err(err),
                 },
                 ExprF::Pi {
-                    param_ty, ret_ty, ..
+                    name,
+                    param_ty,
+                    ret_ty,
                 } => match cur {
-                    0 => param_ty.traverse(path.collect()),
-                    1 => ret_ty.traverse(path.collect()),
+                    0 => {
+                        let name = (name.0.to_string(), name.1);
+                        Ok(Right(name))
+                    }
+                    1 => param_ty.traverse(path.collect()),
+                    2 => ret_ty.traverse(path.collect()),
                     _ => Err(err),
                 },
                 ExprF::Err(_, v) => v
@@ -454,7 +510,7 @@ impl<A: Debug + Clone, B: Debug + Clone, E: Debug + Clone> Traverse for SpannedG
                     .and_then(|x| x.clone().traverse(path.collect())),
             },
 
-            None => Ok(Box::new(self)),
+            None => Ok(Left(self)),
         }
     }
 }

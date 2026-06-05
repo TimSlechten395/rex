@@ -25,6 +25,7 @@ pub mod pipeline;
 
 pub mod bootstrap;
 pub mod eval;
+pub mod nbe;
 
 pub mod helper;
 pub mod r#type;
@@ -33,6 +34,7 @@ pub mod cache;
 pub mod experimental;
 
 pub mod tools;
+pub mod zipper;
 
 pub trait Traverse {
     type Span;
@@ -158,7 +160,10 @@ pub fn compile(
                         let err = err.clone();
                         err.clone().fmap(|err| {
                             let span = || {
-                                let span = traverse_defs(spanned_named_defs.clone(), err.1)?.0.1;
+                                let span = match traverse_defs(spanned_named_defs.clone(), err.1)? {
+                                    either::Either::Left(e) => e.0.1,
+                                    either::Either::Right(s) => s.1,
+                                };
 
                                 let span = traverse_list(spanned_asts.clone(), span)?.0.1;
 
@@ -172,7 +177,7 @@ pub fn compile(
                     .collect()
             };
 
-            Some((name.clone(), ty_errors))
+            Some((name.0.clone(), ty_errors))
         })
         .collect();
 

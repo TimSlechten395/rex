@@ -1,4 +1,5 @@
 use anyhow::bail;
+use either::Either::Left;
 use rex::{
     data::{
         ast::{self, SpannedFixAst},
@@ -85,11 +86,16 @@ pub fn semantic_token<T>(
 
                     let node = expr::traverse_defs(expr, node_path.clone());
                     match node {
-                        Ok(node) => match node.0.0 {
-                            ExprF::Var { .. } => Some(2),
-                            ExprF::Lambda { .. } | ExprF::Pi { .. } => Some(8),
-                            _ => None,
-                        },
+                        Ok(node) => {
+                            let Left(node) = node else {
+                                return None;
+                            };
+                            match node.0.0 {
+                                ExprF::Var { .. } => Some(2),
+                                ExprF::Lambda { .. } | ExprF::Pi { .. } => Some(8),
+                                _ => None,
+                            }
+                        }
                         Err(_) => None,
                     }
                 }

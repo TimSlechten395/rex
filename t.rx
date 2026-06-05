@@ -1,1 +1,2 @@
-def lol := boom bitch get
+def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A

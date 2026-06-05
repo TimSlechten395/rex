@@ -11,3 +11,4 @@ tokio = { version = "1.47.1", features = ["full", "tokio-macros"] }
 ropey = "1.6.1"
 dashmap = "6.1.0"
 anyhow = "1.0.99"
+either = "1.16.0"

@@ -1,7 +1,8 @@
+use either::Either::{Left, Right};
 use rex::{
     data::{
         ast::{self, traverse_list},
-        expr::{self, ExprF, traverse_defs},
+        expr::{self, ExprF, SpannedGExpr, VarKind, traverse_defs},
         tokens::{result_tok_span_to_char_span, tok_span_to_result_tok_span},
     },
     helper::map_index,
@@ -64,7 +65,10 @@ pub async fn document_highlight(
     let first = expr_node
         .clone()
         .map(|n| -> anyhow::Result<_> {
-            let span = n.0.1;
+            let span = match n {
+                Left(e) => e.0.1,
+                Right(s) => s.1,
+            };
             let span = ast::traverse_list(ast, span).unwrap().0.1;
             let span = tok_span_to_result_tok_span(span, &tokens)?;
             let span = result_tok_span_to_char_span(span, &tokens)?;
@@ -74,17 +78,23 @@ pub async fn document_highlight(
         .transpose()?;
 
     let name = expr_node
-        .map(|n| {
-            if let ExprF::Var { idx } = n.remove_span().0 {
-                match idx {
-                    expr::VarKind::Named(n) => Some(n),
-                    expr::VarKind::Idx(_) => None,
-                }
-            } else {
-                None
-            }
+        .map(|n| match n {
+            Left(SpannedGExpr((ExprF::Var { idx }, _))) => match idx {
+                VarKind::Named(n) => Some(n),
+                VarKind::Idx(_) => None,
+            },
+            Right(n) => Some(n.0),
+            _ => None,
         })
         .flatten();
+
+    let expr_path = expr_path.unwrap();
+
+    if *expr_path.get(2).unwrap() == 1 {
+        // got def
+    } else {
+        // got binding
+    }
 
     let mut highlights = vec![];
 

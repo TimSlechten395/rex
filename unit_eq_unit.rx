@@ -1,0 +1,18 @@
+
+def Never: Type := (A: Type) -> A
+
+def Unit: Type := (A: Type) -> A -> A
+def unit (A: Type) (x: A) : A := x
+
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+def unit_eq (x: Unit) (y: Unit): (Eq Unit x y -> Never) -> Never :=
+def unit_eq (x: Unit) (y: Unit): (Eq Unit x y -> Never) -> Never := (ref: Eq Unit x y -> Never)
+
+def Equiv (A: Type) (B: Type) (f: A -> B) (g: A -> B): Type := (a: A) -> Eq B (f a) (g a)
+
+def equiv_refl (A: Type) (B: Type) (f: A -> B): Equiv A B f f := (a: A) => refl B (f a)
+
+
