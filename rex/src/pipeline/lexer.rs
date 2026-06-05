@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use std::str::FromStr;
 
 use chumsky::{prelude::*, text::*};
@@ -5,7 +6,7 @@ use num_bigint::BigUint;
 
 use crate::{
     Compile,
-    data::tokens::{AbsoluteIndent, ErrorToken, ExpectedToken, InertToken, Spanned, Token},
+    data::tokens::{AbsoluteIndent, ErrorToken, GToken, InertToken, Spanned, Token, ValidToken},
 };
 
 pub struct Lexer;
@@ -13,23 +14,15 @@ pub struct Lexer;
 impl Compile for Lexer {
     type Input = String;
 
-    type Output = Vec<Spanned<ExpectedToken<AbsoluteIndent>>>;
+    type Output = Vec<Spanned<Token>>;
 
-    type Error = ErrorToken;
+    type Error = anyhow::Error;
 
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
-        collect_results(
-            lexer()
-                .parse(&input)
-                .into_result()
-                .unwrap()
-                .into_iter()
-                .map(|spanned| match spanned.0 {
-                    Ok(val) => Ok((val, spanned.1)),
-                    Err(e) => Err(e),
-                })
-                .collect(),
-        )
+        lexer()
+            .parse(&input)
+            .into_result()
+            .map_err(|x| anyhow!("failed to parse: {:?}", x))
     }
 }
 
@@ -74,39 +67,35 @@ fn number_parser<'a>() -> impl Parser<'a, &'a str, BigUint, extra::Err<Rich<'a, 
 // }
 //
 
-fn lexer<'a>() -> impl Parser<
-    'a,
-    &'a str,
-    Vec<Spanned<Result<ExpectedToken<AbsoluteIndent>, ErrorToken>>>,
-    extra::Err<Rich<'a, char>>,
-> {
+fn lexer<'a>()
+-> impl Parser<'a, &'a str, Vec<Spanned<GToken<AbsoluteIndent>>>, extra::Err<Rich<'a, char>>> {
     // Keywords
     // Why does lambda need to be between ""?
-    let lambda = text::keyword("fn").to(Token::Fn);
+    let lambda = text::keyword("fn").to(ValidToken::Fn);
 
-    let arrow = just('-').then_ignore(just('>')).to(Token::Arrow);
-    let double_arrow = just('=').then_ignore(just('>')).to(Token::DoubleArrow);
-    let assign = just(':').then_ignore(just('=')).to(Token::Assign);
+    let arrow = just('-').then_ignore(just('>')).to(ValidToken::Arrow);
+    let double_arrow = just('=').then_ignore(just('>')).to(ValidToken::DoubleArrow);
+    let assign = just(':').then_ignore(just('=')).to(ValidToken::Assign);
 
-    let number = number_parser().map(Token::Number);
+    let number = number_parser().map(ValidToken::Number);
 
     let string = ident()
         .delimited_by(just('"'), just('"'))
-        .map(|x: &str| Token::String(x.to_string()));
+        .map(|x: &str| ValidToken::String(x.to_string()));
 
     let base = select! {
-        '.' => Token::Dot,
-        ':' => Token::Colon,
-        '*' => Token::Star,
-        ',' => Token::Comma,
-        '(' => Token::LParen,
-        ')' => Token::RParen,
-        '=' => Token::Eq,
-        ';' => Token::SemiColon,
+        '.' => ValidToken::Dot,
+        ':' => ValidToken::Colon,
+        '*' => ValidToken::Star,
+        ',' => ValidToken::Comma,
+        '(' => ValidToken::LParen,
+        ')' => ValidToken::RParen,
+        '=' => ValidToken::Eq,
+        ';' => ValidToken::SemiColon,
 
     };
 
-    let pipe = just('|').then_ignore(just('>')).to(Token::Pipe);
+    let pipe = just('|').then_ignore(just('>')).to(ValidToken::Pipe);
 
     // Keywords
     //
@@ -115,20 +104,20 @@ fn lexer<'a>() -> impl Parser<
         // "cdr" => Token::Cdr,
         // "cons" => Token::Cons,
         // "Pair" => Token::Pair,
-        "def" => Token::Def,
-        "Type" => Token::Type,
-        "Mod" => Token::Mod,
+        "def" => ValidToken::Def,
+        "Type" => ValidToken::Type,
+        "Mod" => ValidToken::Mod,
         // "just" => Token::Just,
-        "loop" => Token::Loop,
-        "while" => Token::While,
-        "for" => Token::For,
-        "break" => Token::Break,
-        "let" => Token::Let,
-        "in" => Token::In,
+        "loop" => ValidToken::Loop,
+        "while" => ValidToken::While,
+        "for" => ValidToken::For,
+        "break" => ValidToken::Break,
+        "let" => ValidToken::Let,
+        "in" => ValidToken::In,
         // "true" => Token::Bool(true),
         // "false" => Token::Bool(false),
         // "Bool" => Token::BoolTy,
-        _ => Token::Ident(String::from(ident)),
+        _ => ValidToken::Ident(String::from(ident)),
     });
 
     // Integers
@@ -137,7 +126,7 @@ fn lexer<'a>() -> impl Parser<
 
     let newline = newline()
         .ignore_then(just('\t').repeated().count())
-        .map(|n| Token::Newline(AbsoluteIndent(n)));
+        .map(|n| ValidToken::Newline(AbsoluteIndent(n)));
 
     // Token parser: choice of all tokens, with whitespace trimmed around
     let token = choice((
@@ -152,28 +141,21 @@ fn lexer<'a>() -> impl Parser<
         pipe,
         newline,
     ))
-    .map_with(|token, e| (Ok(ExpectedToken::Token(token)), e.span()));
+    .map_with(|token, e| (GToken::ValidToken(token), e.span()));
 
     // inert tokens
-    let space = whitespace().at_least(1).count().map_with(|amount, e| {
-        (
-            Ok(ExpectedToken::InertToken(InertToken::Space(amount))),
-            e.span(),
-        )
-    });
+    let space = whitespace()
+        .at_least(1)
+        .count()
+        .map_with(|amount, e| (GToken::InertToken(InertToken::Space(amount)), e.span()));
 
     let comment = just("//")
         .ignore_then(comment_content)
-        .map_with(|content, e| {
-            (
-                Ok(ExpectedToken::InertToken(InertToken::Comment(content))),
-                e.span(),
-            )
-        });
+        .map_with(|content, e| (GToken::InertToken(InertToken::Comment(content)), e.span()));
 
     let expected_token = choice((token, space, comment));
 
-    let invalid = any().map_with(|c, e| (Err(ErrorToken::InvalidChar(c)), e.span()));
+    let invalid = any().map_with(|c, e| (GToken::ErrorToken(ErrorToken::InvalidChar(c)), e.span()));
 
     let normal_token = expected_token.or(invalid).repeated().collect::<Vec<_>>();
     normal_token

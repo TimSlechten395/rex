@@ -1,0 +1,15 @@
+// ResultTokens and Tokens have a slightly different span as errortokens can simply be ignored
+// for now any ResultAst that is not an Ast is ignored due to complexity, the same goes for NamedExpr
+
+chars -> ResultTokens -> Tokens -> Ast -> Expr
+
+suppose we are looking for the expression corresponding to the span 1, 3, 3, 4, 3
+and the expression starts with 1, 3, 3
+
+
+// We could compile from ResultAst directly to ResultExpr with ErrorNode always resulting in ErrorExpr
+// compileing from Result to Result directly without cleaning also makes sense since the Error variant might still contain usefull information anyway
+
+
+// search
+// if I have a loc for char I can search for it in 

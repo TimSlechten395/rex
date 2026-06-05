@@ -3,8 +3,9 @@ use clap_derive::Subcommand;
 use rex::{
     bootstrap::compile_min_version,
     compile,
-    data::expr::{Expr, ExprF, GExpr},
+    data::expr::{Expr, ExprF, GDef, GExpr},
     eval::{normal_form, weak_head_normal_form},
+    helper::find_char,
     pipeline::{
         desugar::{create_accessor, create_string},
         name_resolver::{self, to_indices},
@@ -70,48 +71,33 @@ fn main() -> anyhow::Result<()> {
                 }
             }?;
 
-            //
-            // let expr = code.map(|c| {
-            //     c.and_then(|c| match c.chars().nth(0).unwrap() {
-            //         '~' => {
-            //             let s = c.strip_prefix('~').context("expected '~' prefix")?;
-            //             let (start, end) = s.split_once(':').context("expected 'N:N' format")?;
-            //             Ok((
-            //                 to_indices(create_accessor(
-            //                     start.parse().context("invalid start number")?,
-            //                     end.parse().context("invalid end number")?,
-            //                 ))
-            //                 .context("failed name resolving")?,
-            //                 Vec::new(),
-            //             ))
-            //         }
-            //         _ => compile(c),
-            //     })
-            // });
-            //
-
-            let exprs = compile(code)?;
+            let (tokens, ast, expr, ty_errors) = compile(code)?;
             if bootstrap {
-                let exprs: Vec<_> = exprs.0.into_iter().map(|x| (x.0, x.1.ok())).collect();
+                let exprs: Vec<_> = expr
+                    .0
+                    .into_iter()
+                    .map(|x| (x.name, x.val.remove_span()))
+                    .collect();
                 let json = serde_json::to_string(&exprs)?;
                 println!("{}", json);
             } else {
-                for (name, expr) in exprs.0.into_iter() {
-                    let expr = normal_form(expr?);
-                    println!("{}: {:?}", name, print_expr(expr));
-                    println!("---------------------------");
-                }
+                let msg = find_char(tokens, ast, expr, 119)?;
+                println!("{}", msg);
 
-                for (name, ty_errors) in exprs.1.into_iter() {
-                    let ty_errors = ty_errors
-                        .into_iter()
-                        .map(|err| {
-                            err.fmap(|(expr, span)| format!("{} @ {:?}", print_expr(expr), span))
-                        })
-                        .collect::<Vec<_>>();
-                    println!("{}: {:?}", name, ty_errors);
-                    println!("---------------------------");
-                }
+                // for GDef { name, ty: _, val } in exprs.0.0.into_iter() {
+                //     let expr = normal_form(val.remove_span());
+                //     println!("{}: {:?}", name, print_expr(expr));
+                //     println!("---------------------------");
+                // }
+                //
+                // for (name, ty_errors) in exprs.1.into_iter() {
+                //     let ty_errors = ty_errors
+                //         .into_iter()
+                //         .map(|err| err.fmap(|(expr, span)| format!("{:?}", span)))
+                //         .collect::<Vec<_>>();
+                //     println!("{}: {:?}", name, ty_errors);
+                //     println!("---------------------------");
+                // }
             }
 
             // for res in expr.clone() {
@@ -129,26 +115,6 @@ fn main() -> anyhow::Result<()> {
             // }
         }
     };
-
-    // let expr = expr
-    //     .filter_map(|x| x.ok().map(|x| x.0))
-    //     .fold(None, |acc, item| {
-    //         Some(match acc {
-    //             None => item,
-    //             Some(left) => GExpr(ExprF::App {
-    //                 func: Box::new(left),
-    //                 arg: Box::new(item),
-    //             }),
-    //         })
-    //     });
-    //
-    // if let Some(e) = expr {
-    // let e = weak_head_normal_form(e);
-    //     println!(
-    //         "combined expr: {:?}",
-    //         print_expr(e, Prec::LOWEST, None, false, &mut Vec::new())
-    //     );
-    // }
 
     Ok(())
 }

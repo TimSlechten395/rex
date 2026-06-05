@@ -1,10 +1,15 @@
 use anyhow::anyhow;
 use anyhow::bail;
-use chumsky::Parser;
-use rex::{
-    ErrorToken, SpannedResultSugarExpr, Token, desugar, extract_good_toks, get_normal_expr,
-    parser::Spanned, remove_span, sea_nodes::lower_expr, to_indices,
-};
+use rex::Compile;
+use rex::data::ast::Ast;
+use rex::data::ast::SpannedFixAst;
+use rex::data::tokens;
+use rex::data::tokens::GToken;
+use rex::data::tokens::extract_good_toks;
+use rex::pipeline::desugar::Desugar;
+use rex::pipeline::lexer::Lexer;
+use rex::pipeline::name_resolver::NameResolver;
+use rex::pipeline::parser::Parser;
 use ropey::Rope;
 use tokio::sync::mpsc::channel;
 use tower_lsp_server::lsp_types::{Diagnostic, DiagnosticSeverity, MessageType, Uri};
@@ -22,10 +27,11 @@ pub async fn update(backend: &Backend, uri: Uri, text: String) -> anyhow::Result
     let files = backend.files.clone();
     files.insert(uri.clone(), file);
 
-    let sea = backend.sea_of_nodes.clone();
+    // let sea = backend.sea_of_nodes.clone();
     let toks = backend.tokens.clone();
-    let sugar_asts = backend.sugar_asts.clone();
-    let core_asts = backend.core_asts.clone();
+    let asts = backend.asts.clone();
+    let named_exprs = backend.named_exprs.clone();
+    let exprs = backend.exprs.clone();
 
     let (diag_tx, mut diag_rx) = channel::<Vec<Diagnostic>>(10);
 
@@ -33,27 +39,39 @@ pub async fn update(backend: &Backend, uri: Uri, text: String) -> anyhow::Result
 
     let compiler = tokio::task::spawn_blocking(move || {
         let uri = uri2;
-        let lexer = rex::lexer::lexer();
 
-        let Ok(spanned_tokens) = lexer.parse(&text).into_result() else {
+        let Ok(spanned_tokens) = Lexer::run(text) else {
             bail!("Failed to lex file: {uri:?}")
         };
 
         toks.insert(uri.clone(), spanned_tokens.clone());
 
-        let tokens = extract_good_toks(spanned_tokens.clone());
+        let tokens =
+            extract_good_toks(spanned_tokens.clone().into_iter().map(|(x, _)| x).collect());
         let file = files.get(&uri).ok_or(anyhow::anyhow!("failed"))?;
 
         let err_tokens = spanned_tokens
             .clone()
             .into_iter()
-            .filter_map(|(opt_tok, span)| Result::err(opt_tok.map_err(|t| (t, span))))
+            .filter_map(|(tok, span)| match tok {
+                rex::data::tokens::GToken::ErrorToken(error_token) => Some((error_token, span)),
+                _ => None,
+            })
             .map(|(err_tok, span)| {
                 let range = span_to_range(&file, span.into_range());
+
+                let error_message = match err_tok {
+                    rex::data::tokens::ErrorToken::InvalidChar(c) => {
+                        format!("invalid token: {}", c)
+                    }
+                    rex::data::tokens::ErrorToken::MisplacedTabs(tabs) => {
+                        format!("tabs not at the beginning of the line count: {} ", tabs)
+                    }
+                };
                 Diagnostic {
                     range,
                     severity: Some(DiagnosticSeverity::ERROR),
-                    message: format!("invalid token: {} {}", err_tok.char, err_tok.message),
+                    message: error_message,
                     source: Some("rex".to_string()),
 
                     ..Default::default()
@@ -63,28 +81,22 @@ pub async fn update(backend: &Backend, uri: Uri, text: String) -> anyhow::Result
 
         diag_tx.blocking_send(err_tokens)?;
 
-        let parser = rex::parser();
-        let Ok(sugar_ast) = parser.parse(&tokens).into_result() else {
+        let Ok(ast) = Parser::run(tokens) else {
             bail!("Failed to parse file: {uri:?}")
         };
-        sugar_asts.insert(uri.clone(), sugar_ast.clone());
+        asts.insert(uri.clone(), ast.clone());
 
-        let parse_diags = collect_parse_diags(&file, &spanned_tokens, sugar_ast.clone())?;
+        // let parse_diags = collect_parse_diags(&file, &spanned_tokens, sugar_ast.clone())?;
 
-        diag_tx.blocking_send(parse_diags)?;
+        // diag_tx.blocking_send(parse_diags)?;
 
-        let Some(normal_ast) = get_normal_expr(remove_span(sugar_ast.clone())) else {
-            bail!("invalid ast: {:?}", sugar_ast)
-        };
-        let loc = Vec::new();
-        let Some(desugared) = desugar(normal_ast, loc) else {
+        let Ok(expr) = Desugar::run(ast.into_iter().map(|x| x.remove_span()).collect()) else {
             bail!("Failed to lower ast")
         };
+        named_exprs.insert(uri.clone(), expr.clone());
 
-        let name_resolved = to_indices(desugared.remove_span())?;
-
-        let id = lower_expr(&name_resolved, &mut *sea.blocking_lock());
-        core_asts.insert(uri.clone(), vec![id]);
+        let name_resolved = NameResolver::run(expr)?;
+        exprs.insert(uri.clone(), name_resolved.clone());
 
         Ok(())
     });
@@ -118,47 +130,43 @@ pub async fn update(backend: &Backend, uri: Uri, text: String) -> anyhow::Result
     Ok(())
 }
 
-pub fn collect_parse_diags(
+pub fn collect_parse_diags<T>(
     rope: &ropey::Rope,
-    tokens: &Vec<Spanned<Result<Token, ErrorToken>>>,
-    sugar_ast: SpannedResultSugarExpr,
+    tokens: &Vec<tokens::Spanned<GToken<T>>>,
+    ast: SpannedFixAst,
 ) -> anyhow::Result<Vec<Diagnostic>> {
-    let res = match sugar_ast.0.0 {
-        Ok(valid) => valid.fold(Vec::new(), |mut acc, node| {
-            acc.extend_from_slice(&collect_parse_diags(rope, tokens, *node).unwrap());
-            acc
-        }),
-        Err(invalid) => {
-            let span = sugar_ast.0.1.into_range();
-            let range = char_span_from_sugar_ast_span(tokens, span)
-                .map_err(|x| x.context("Span error: "))?;
-            let range = span_to_range(rope, range);
-            let diagnostic = Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: format!("invalid ast node: {} ", invalid),
-                source: Some("rex".to_string()),
-
-                ..Default::default()
-            };
-            invalid.fold(vec![diagnostic], |mut acc, node| {
-                acc.extend_from_slice(&collect_parse_diags(rope, tokens, *node).unwrap());
-                acc
-            })
-        }
+    let diags = if let Ast::Error(e, _) = ast.0.0.clone() {
+        let span = ast.0.1;
+        let range = char_span_from_ast_span(tokens, span).map_err(|x| x.context("Span error: "))?;
+        let range = span_to_range(rope, range);
+        let diagnostic = Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::ERROR),
+            message: format!("invalid ast node: {} ", e),
+            source: Some("rex".to_string()),
+            ..Default::default()
+        };
+        vec![diagnostic]
+    } else {
+        vec![]
     };
+
+    let res = ast.0.0.fold(diags, |mut acc, node| {
+        acc.extend_from_slice(&collect_parse_diags(rope, tokens, node).unwrap());
+        acc
+    });
     Ok(res)
 }
 
-pub fn char_span_from_sugar_ast_span(
-    tokens: &Vec<Spanned<Result<Token, ErrorToken>>>,
-    span: std::ops::Range<usize>,
+pub fn char_span_from_ast_span<T>(
+    tokens: &Vec<tokens::Spanned<GToken<T>>>,
+    span: std::ops::RangeInclusive<usize>,
 ) -> anyhow::Result<std::ops::Range<usize>> {
-    let start = span.start;
-    let end = span.end - 1;
+    let start = *span.start();
+    let end = *span.end() - 1;
     let good_toks = tokens
         .iter()
-        .filter(|x| matches!(x.0, Ok(Token::RealToken(_))));
+        .filter(|x| matches!(x.0, GToken::ValidToken(_)));
 
     let start_span = good_toks
         .clone()

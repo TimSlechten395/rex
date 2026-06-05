@@ -1,3 +1,5 @@
+pub mod completion;
+pub mod document_highlight;
 pub mod helper;
 pub mod hover;
 pub mod semantic_tokens;
@@ -5,15 +7,15 @@ pub mod update;
 
 use std::sync::Arc;
 
+use chumsky::span::SimpleSpan;
 use dashmap::DashMap;
-use rex::sea_nodes::{NodeId, SeaOfNodes};
-use rex::{ErrorToken, SpannedResultSugarExpr, Token};
+use rex::data::ast::SpannedFixAst;
+use rex::data::expr::{Defs, Expr, NamedDefs, SpannedExpr, SpannedNamedExpr};
+use rex::data::tokens::{self, AbsoluteIndent, ErrorToken, GToken, Token};
 use ropey::Rope;
 use tokio::sync::Mutex;
 use tower_lsp_server::lsp_types::*;
 use tower_lsp_server::{Client, LanguageServer, jsonrpc};
-
-use rex::lexer::Spanned;
 
 use crate::semantic_tokens::{semantic_tokens_full, semantics};
 use crate::update::update;
@@ -22,11 +24,12 @@ use crate::update::update;
 pub struct Backend {
     pub client: Client,
     pub files: Arc<DashMap<Uri, Rope>>,
-    pub tokens: Arc<DashMap<Uri, Vec<Spanned<Result<Token, ErrorToken>>>>>,
+    pub tokens: Arc<DashMap<Uri, Vec<tokens::Spanned<Token>>>>,
     // This is actually quite expensive to store like this
-    pub sugar_asts: Arc<DashMap<Uri, SpannedResultSugarExpr>>,
-    pub core_asts: Arc<DashMap<Uri, Vec<NodeId>>>,
-    pub sea_of_nodes: Arc<Mutex<SeaOfNodes>>,
+    pub asts: Arc<DashMap<Uri, Vec<SpannedFixAst>>>,
+    pub named_exprs: Arc<DashMap<Uri, NamedDefs>>,
+    pub exprs: Arc<DashMap<Uri, Defs>>,
+    // pub sea_of_nodes: Arc<Mutex<SeaOfNodes>>,
     pub diagnostics: Arc<Mutex<Vec<Diagnostic>>>,
 }
 
@@ -40,11 +43,16 @@ impl LanguageServer for Backend {
             capabilities: ServerCapabilities {
                 position_encoding: Some(PositionEncodingKind::UTF8),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
-                completion_provider: Some(CompletionOptions::default()),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![".".to_string(), ":".to_string()]),
+                    resolve_provider: Some(false),
+                    ..Default::default()
+                }),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
                 semantic_tokens_provider: semantics(),
+                document_highlight_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -108,15 +116,40 @@ impl LanguageServer for Backend {
         self.files.remove(&file.uri);
     }
 
-    // Simple completion: always offer the same two items.
     async fn completion(
         &self,
-        _params: CompletionParams,
+        params: CompletionParams,
     ) -> jsonrpc::Result<Option<CompletionResponse>> {
-        Ok(Some(CompletionResponse::Array(vec![
-            CompletionItem::new_simple("Hello".into(), "Greets the user".into()),
-            CompletionItem::new_simple("Bye".into(), "Says farewell".into()),
-        ])))
+        match completion::completion(self, params).await {
+            Ok(comp) => Ok(comp),
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Failed completion request: {:?}", e),
+                    )
+                    .await;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> jsonrpc::Result<Option<Vec<DocumentHighlight>>> {
+        match document_highlight::document_highlight(self, params).await {
+            Ok(comp) => Ok(comp),
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Failed completion request: {:?}", e),
+                    )
+                    .await;
+                Ok(None)
+            }
+        }
     }
 
     // Simple hover: show a fixed message.

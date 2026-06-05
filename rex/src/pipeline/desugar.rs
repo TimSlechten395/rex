@@ -8,11 +8,10 @@ use crate::{
     data::{
         ast::{Ast, FixAst, LitKind},
         expr::{
-            Builtin, ExprError, ExprF, GExpr, NamedExpr, Spanned, SpannedExpr, SpannedNamedExpr,
-            VarKind,
+            Builtin, ExprError, ExprF, GDef, GDefs, GExpr, NamedDefs, NamedExpr, Spanned,
+            SpannedGExpr, SpannedNamedExpr, VarKind,
         },
     },
-    def::{Def, Defs},
     helper::push_new,
 };
 
@@ -20,13 +19,13 @@ pub struct Desugar;
 
 impl Compile for Desugar {
     type Input = Vec<FixAst>;
-    type Output = (Defs, Defs);
+    type Output = NamedDefs;
     // Why is this a Vec<usize>?
     type Error = ExprError<Vec<usize>>;
 
+    // this should just take one FixAst and then resolve instead
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
         let mut defs = Vec::new();
-        let mut def_tys = Vec::new();
 
         for (i, input) in input.into_iter().enumerate() {
             let binding = extract_binding(input, vec![i], BindingPriority::NameTyVal)?;
@@ -34,13 +33,13 @@ impl Compile for Desugar {
             let name = binding.name.ok_or(ExprError::MissingBinder(vec![i]))?.0;
             let val = binding.val.ok_or(ExprError::MissingValue(vec![i]))?;
 
-            defs.push((name.clone(), val.clone()));
-
-            if let Some(ty) = binding.ty {
-                def_tys.push((name, ty));
-            }
+            defs.push(GDef {
+                name,
+                ty: binding.ty,
+                val,
+            })
         }
-        return Ok((defs, def_tys));
+        return Ok(GDefs(defs));
     }
 }
 
@@ -230,7 +229,9 @@ pub fn extract_binder(expr: FixAst, loc: Vec<usize>) -> Result<FullBinder, ExprE
                 items.collect::<Result<_, _>>()?,
             ))
         }
-        _ => Err(ExprError::InvalidBinder(loc.clone())),
+        _ => {
+            return Err(ExprError::InvalidBinder(loc.clone()));
+        }
     }
 }
 
@@ -240,10 +241,7 @@ pub enum BindingPriority {
     ValNameTy, // used for tuples
 }
 
-pub fn fold_ty(
-    binder: FullBinder,
-    ty: Result<SpannedNamedExpr, ExprError<Vec<usize>>>,
-) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
+pub fn fold_ty(binder: FullBinder, ty: SpannedNamedExpr, loc: Vec<usize>) -> SpannedNamedExpr {
     binder
         .1
         .clone()
@@ -251,7 +249,7 @@ pub fn fold_ty(
         .clone()
         .rev()
         .fold(ty, |acc, item| {
-            Ok(SpannedExpr((
+            SpannedGExpr((
                 ExprF::Pi {
                     name: item
                         .0
@@ -259,23 +257,18 @@ pub fn fold_ty(
                         .clone()
                         .map(|x| VarKind::Named(x.0))
                         .unwrap_or(VarKind::Idx("".to_string())),
-                    param_ty: Box::new(
-                        item.0
-                            .ty
-                            .clone()
-                            .ok_or(ExprError::InvalidBinderParam(item.1.clone()))?,
-                    ),
-                    ret_ty: Box::new(acc?),
+                    param_ty: Box::new(item.0.ty.clone().unwrap_or(SpannedGExpr((
+                        ExprF::Err(ExprError::InvalidBinderParam(item.1.clone()), vec![]),
+                        item.1.clone(),
+                    )))),
+                    ret_ty: Box::new(acc),
                 },
-                item.1,
-            )))
+                loc.clone(),
+            ))
         })
 }
 
-pub fn fold_val(
-    binder: FullBinder,
-    body: Result<SpannedNamedExpr, ExprError<Vec<usize>>>,
-) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
+pub fn fold_val(binder: FullBinder, body: SpannedNamedExpr, loc: Vec<usize>) -> SpannedNamedExpr {
     binder
         .1
         .clone()
@@ -283,7 +276,7 @@ pub fn fold_val(
         .clone()
         .rev()
         .fold(body, |acc, item| {
-            Ok(SpannedExpr((
+            SpannedGExpr((
                 ExprF::Lambda {
                     name: item
                         .0
@@ -292,16 +285,14 @@ pub fn fold_val(
                         .map(|x| VarKind::Named(x.0))
                         .unwrap_or(VarKind::Idx("".to_string())),
                     // This is a problem it needs to stay empty
-                    param_ty: Box::new(
-                        item.0
-                            .ty
-                            .clone()
-                            .ok_or(ExprError::InvalidBinderParam(item.1.clone()))?,
-                    ),
-                    body: Box::new(acc?),
+                    param_ty: Box::new(item.0.ty.clone().unwrap_or(SpannedGExpr((
+                        ExprF::Err(ExprError::InvalidBinderParam(item.1.clone()), vec![]),
+                        item.1.clone(),
+                    )))),
+                    body: Box::new(acc),
                 },
-                item.1,
-            )))
+                loc.clone(),
+            ))
         })
 }
 
@@ -326,13 +317,13 @@ pub fn extract_binding(
                     let mut items = iter_with_loc(items, named.1.clone());
                     let binder_expr = items.next().unwrap();
 
-                    let ty = items.map(|(expr, i)| desugar(expr, i)).next().unwrap();
+                    let ty = items.map(|(expr, loc)| desugar(expr, loc)).next().unwrap();
 
                     let binder = extract_binder(binder_expr.0.clone(), binder_expr.1.clone())?;
 
                     // converting 'succ (n : Nat) : Nat' into 'succ: (n: Nat) -> Nat'
-                    let ty = fold_ty(binder.clone(), ty)?;
-                    let val = fold_val(binder.clone(), val)?;
+                    let ty = fold_ty(binder.clone(), ty, loc.clone());
+                    let val = fold_val(binder.clone(), val, loc.clone());
 
                     TypedBinding {
                         name: Some(binder.0),
@@ -343,7 +334,7 @@ pub fn extract_binding(
                 _ => {
                     let binder = extract_binder(named.0.clone(), named.1.clone())?;
 
-                    let val = fold_val(binder.clone(), val)?;
+                    let val = fold_val(binder.clone(), val, loc.clone());
 
                     TypedBinding {
                         name: Some(binder.0),
@@ -361,7 +352,7 @@ pub fn extract_binding(
 
             let binder = extract_binder(binder_or_val.0.clone(), binder_or_val.1.clone())?;
 
-            let ty = fold_ty(binder.clone(), ty)?;
+            let ty = fold_ty(binder.clone(), ty, loc.clone());
 
             TypedBinding {
                 name: Some(binder.0),
@@ -379,7 +370,7 @@ pub fn extract_binding(
                 }
             }
             BindingPriority::TyNameVal => {
-                let ty = desugar(FixAst(item), loc.clone())?;
+                let ty = desugar(FixAst(item), loc.clone());
                 TypedBinding {
                     name: None,
                     ty: Some(ty),
@@ -387,7 +378,7 @@ pub fn extract_binding(
                 }
             }
             BindingPriority::ValNameTy => {
-                let val = desugar(FixAst(item), loc.clone())?;
+                let val = desugar(FixAst(item), loc.clone());
                 TypedBinding {
                     name: None,
                     ty: None,
@@ -399,29 +390,58 @@ pub fn extract_binding(
     Ok(binding)
 }
 
-pub fn with_zero_span(x: NamedExpr) -> SpannedNamedExpr {
-    SpannedExpr((x.0.fmap(|x| Box::new(with_zero_span(*x))), Vec::new()))
+pub fn with_const_span(x: NamedExpr, loc: Vec<usize>) -> SpannedNamedExpr {
+    SpannedGExpr((
+        x.0.fmap(|x| Box::new(with_const_span(*x, loc.clone()))),
+        loc,
+    ))
 }
 
 // This is the main function
 // TODO: We need a system to allow for partial type annotation
 // TODO: We also need to keep the spans in the exprTree
-pub fn desugar(expr: FixAst, loc: Vec<usize>) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
+pub fn desugar(expr: FixAst, loc: Vec<usize>) -> SpannedNamedExpr {
     use Ast::*;
     let new_expr = match expr.0 {
+        Error(_, e) => ExprF::Err(
+            ExprError::Unknown,
+            iter_with_loc(e, loc.clone())
+                .map(|(x, loc)| Box::new(desugar(x, loc)))
+                .collect(),
+        ),
+        Type => ExprF::Type,
+        Unit => ExprF::Lambda {
+            name: VarKind::Idx("".to_string()),
+            param_ty: Box::new(SpannedGExpr((ExprF::Type, loc.clone()))),
+            body: Box::new(SpannedGExpr((
+                ExprF::Lambda {
+                    name: VarKind::Idx("".to_string()),
+                    param_ty: Box::new(SpannedGExpr((
+                        ExprF::Var {
+                            idx: VarKind::Idx(0),
+                        },
+                        loc.clone(),
+                    ))),
+                    body: Box::new(SpannedGExpr((
+                        ExprF::Var {
+                            idx: VarKind::Idx(0),
+                        },
+                        loc.clone(),
+                    ))),
+                },
+                loc.clone(),
+            ))),
+        },
         Var(name) => ExprF::Var {
             idx: VarKind::Named(name),
         },
         Lit(lit) => match lit {
             LitKind::Number(n) => {
                 let num = create_church_num(n);
-                return Ok(with_zero_span(num));
+                return with_const_span(num, loc.clone());
             }
             LitKind::String(s) => {
-                return Ok(SpannedExpr((
-                    ExprF::Builtin(Builtin::String(s)),
-                    loc.clone(),
-                )));
+                return SpannedGExpr((ExprF::Builtin(Builtin::String(s)), loc.clone()));
 
                 // let lit = create_string(s);
                 // return Ok(with_zero_span(lit));
@@ -435,42 +455,48 @@ pub fn desugar(expr: FixAst, loc: Vec<usize>) -> Result<SpannedNamedExpr, ExprEr
             todo!() //
         }
         App(items) => {
-            let mut items = iter_with_loc(items, loc.clone());
+            let mut items = iter_with_loc(items, loc.clone()).map(|(x, loc)| desugar(x, loc));
             let base = items.next().unwrap();
 
-            return items.fold(desugar(base.0, base.1), |acc, item| {
-                Ok(SpannedExpr((
+            return items.fold(base, |acc, item| {
+                SpannedGExpr((
                     ExprF::App {
-                        func: Box::new(acc?),
-                        arg: Box::new(desugar(item.0.clone(), item.1.clone())?),
+                        func: Box::new(acc.clone()),
+                        arg: Box::new(item),
                     },
                     loc.clone(),
-                )))
+                ))
             });
         }
-
+        // (1 2) 3
+        // we start by desugaring the
+        //
         Lambda(items) => {
             let mut items = iter_with_loc(items, loc.clone()).rev();
             let base = items.next().unwrap();
 
             return items.fold(desugar(base.0, base.1), |acc, item| {
                 let binding =
-                    extract_binding(item.0.clone(), item.1.clone(), BindingPriority::NameTyVal)?;
+                    extract_binding(item.0.clone(), item.1.clone(), BindingPriority::NameTyVal);
 
-                Ok(SpannedExpr((
-                    ExprF::Lambda {
-                        name: binding
-                            .name
-                            .clone()
-                            .map(|x| VarKind::Named(x.0))
-                            .unwrap_or(VarKind::Idx("".to_string())),
-                        param_ty: Box::new(
-                            binding.ty.ok_or(ExprError::MissingType(item.1.clone()))?,
-                        ),
-                        body: Box::new(acc?),
-                    },
-                    loc.clone(),
-                )))
+                match binding {
+                    Ok(binding) => SpannedGExpr((
+                        ExprF::Lambda {
+                            name: binding
+                                .name
+                                .clone()
+                                .map(|x| VarKind::Named(x.0))
+                                .unwrap_or(VarKind::Idx("".to_string())),
+                            param_ty: Box::new(binding.ty.unwrap_or(SpannedGExpr((
+                                ExprF::Err(ExprError::MissingType(item.1.clone()), vec![]),
+                                loc.clone(),
+                            )))),
+                            body: Box::new(acc),
+                        },
+                        loc.clone(),
+                    )),
+                    Err(e) => SpannedGExpr((ExprF::Err(e, vec![]), loc.clone())),
+                }
             });
         }
 
@@ -480,88 +506,83 @@ pub fn desugar(expr: FixAst, loc: Vec<usize>) -> Result<SpannedNamedExpr, ExprEr
 
             return items.fold(desugar(base.0, base.1), |acc, item| {
                 let binding =
-                    extract_binding(item.0.clone(), item.1.clone(), BindingPriority::TyNameVal)?;
+                    extract_binding(item.0.clone(), item.1.clone(), BindingPriority::TyNameVal);
 
-                Ok(SpannedExpr((
-                    ExprF::Pi {
-                        name: binding
-                            .name
-                            .clone()
-                            .map(|x| VarKind::Named(x.0))
-                            .unwrap_or(VarKind::Idx("".to_string())),
-                        param_ty: Box::new(binding.ty.ok_or(ExprError::MissingType(item.1))?),
-                        ret_ty: Box::new(acc?),
-                    },
-                    loc.clone(),
-                )))
+                match binding {
+                    Ok(binding) => SpannedGExpr((
+                        ExprF::Pi {
+                            name: binding
+                                .name
+                                .clone()
+                                .map(|x| VarKind::Named(x.0))
+                                .unwrap_or(VarKind::Idx("".to_string())),
+                            param_ty: Box::new(binding.ty.unwrap_or(SpannedGExpr((
+                                ExprF::Err(ExprError::MissingType(item.1.clone()), vec![]),
+                                loc.clone(),
+                            )))),
+                            ret_ty: Box::new(acc),
+                        },
+                        loc.clone(),
+                    )),
+                    Err(e) => SpannedGExpr((ExprF::Err(e, vec![]), loc.clone())),
+                }
             });
         }
-        Tuple(items) => {
-            let bindings = to_bindings(items, loc.clone());
-            return create_tuple(bindings, loc.clone());
-        }
-        Sigma(items) => {
-            let bindings = to_bindings(items, loc.clone());
-            return create_sigma(bindings, loc.clone());
-        }
-        Pipe(items) => {
-            let mut items = iter_with_loc(items, loc.clone());
-            let base = items.next().unwrap();
-
-            return items.fold(desugar(base.0, base.1), |acc, item| {
-                Ok(SpannedExpr((
-                    ExprF::App {
-                        func: Box::new(acc?),
-                        arg: Box::new(desugar(item.0.clone(), item.1.clone())?),
-                    },
-                    loc.clone(),
-                )))
-            });
-        }
+        // Tuple(items) => {
+        //     let bindings = to_bindings(items, loc.clone());
+        //     return create_tuple(bindings, loc.clone()).;
+        // }
+        // Sigma(items) => {
+        //     let bindings = to_bindings(items, loc.clone());
+        //     return create_sigma(bindings, loc.clone());
+        // }
+        // Pipe(items) => {
+        //     let mut items = iter_with_loc(items, loc.clone());
+        //     let base = items.next().unwrap();
+        //
+        //     return items.fold(desugar(base.0, base.1), |acc, item| {
+        //         Ok(SpannedGExpr((
+        //             ExprF::App {
+        //                 func: Box::new(acc?),
+        //                 arg: Box::new(desugar(item.0.clone(), item.1.clone())?),
+        //             },
+        //             loc.clone(),
+        //         )))
+        //     });
+        // }
         Group(expr) => {
             return desugar(*expr, push_new(loc.clone(), 0));
         }
-        Type => ExprF::Type,
-        Unit => ExprF::Lambda {
-            name: VarKind::Idx("".to_string()),
-            param_ty: Box::new(SpannedExpr((ExprF::Type, loc.clone()))),
-            body: Box::new(SpannedExpr((
-                ExprF::Lambda {
-                    name: VarKind::Idx("".to_string()),
-                    param_ty: Box::new(SpannedExpr((
-                        ExprF::Var {
-                            idx: VarKind::Idx(0),
-                        },
-                        loc.clone(),
-                    ))),
-                    body: Box::new(SpannedExpr((
-                        ExprF::Var {
-                            idx: VarKind::Idx(0),
-                        },
-                        loc.clone(),
-                    ))),
-                },
-                loc.clone(),
-            ))),
-        },
         Ann(_) => {
-            let binding = extract_binding(expr, loc.clone(), BindingPriority::ValNameTy)?;
-            return binding.val.ok_or(ExprError::MissingValue(loc.clone()));
+            let Ok(binding) = extract_binding(expr, loc.clone(), BindingPriority::ValNameTy) else {
+                return SpannedGExpr((ExprF::Err(ExprError::Unknown, vec![]), loc.clone()));
+            };
+
+            return binding.val.unwrap_or(SpannedGExpr((
+                ExprF::Err(ExprError::MissingValue(loc.clone()), vec![]),
+                loc.clone(),
+            )));
         }
         Binding(_) => {
-            let binding = extract_binding(expr, loc.clone(), BindingPriority::ValNameTy)?;
-            return binding.val.ok_or(ExprError::MissingValue(loc.clone()));
+            let Ok(binding) = extract_binding(expr, loc.clone(), BindingPriority::ValNameTy) else {
+                return SpannedGExpr((ExprF::Err(ExprError::Unknown, vec![]), loc.clone()));
+            };
+            return binding.val.unwrap_or(SpannedGExpr((
+                ExprF::Err(ExprError::MissingValue(loc.clone()), vec![]),
+                loc.clone(),
+            )));
         } // We do not have a module system just yet, just a list of definitions
-          // Module(_deps, items) => {
-          //     let loc_items = push_new(loc.clone(), 1);
-          //
-          //     let bindings = to_bindings(items, loc_items.clone());
-          //
-          //     return create_tuple(bindings.clone(), loc_items.clone());
-          // }
+        // Module(_deps, items) => {
+        //     let loc_items = push_new(loc.clone(), 1);
+        //
+        //     let bindings = to_bindings(items, loc_items.clone());
+        //
+        //     return create_tuple(bindings.clone(), loc_items.clone());
+        // }
+        _ => todo!(),
     };
 
-    Ok(SpannedExpr((new_expr, loc.clone())))
+    SpannedGExpr((new_expr, loc.clone()))
 }
 
 fn to_bindings(
@@ -587,8 +608,10 @@ pub struct TypedBindingNoOption {
 }
 
 // replace definitions while also changing definitions at runtime
-pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr {
-    fn go(expr: SpannedNamedExpr, ctx: &mut Vec<String>, defs: &mut Defs) -> SpannedNamedExpr {
+type Def = (String, SpannedNamedExpr);
+type Defs = Vec<Def>;
+pub fn replace_defs(expr: SpannedNamedExpr, defs: &Defs) -> SpannedNamedExpr {
+    fn go(expr: SpannedNamedExpr, ctx: &mut Vec<String>, defs: &Defs) -> SpannedNamedExpr {
         let new = match expr.0.0 {
             ExprF::Var { idx } => match idx {
                 VarKind::Named(s) => {
@@ -599,13 +622,7 @@ pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr
                     } else {
                         match defs.iter().rposition(|(name, _)| *name == s) {
                             Some(pos) => {
-                                let (_, expr) = defs.get_mut(pos).unwrap();
-                                // println!("replaced {s} with {expr:?}");
-                                // println!("-------------------------");
-                                let new_expr = replace_defs(expr.clone(), defs);
-                                let (_, expr) = defs.get_mut(pos).unwrap();
-                                *expr = new_expr.clone();
-                                return new_expr;
+                                return defs.get(pos).unwrap().1.clone();
                             }
                             None => {
                                 // println!("could not find name: {s}");
@@ -625,6 +642,13 @@ pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr
                 let arg = Box::new(go(*arg, ctx, defs));
                 ExprF::App { func, arg }
             }
+            ExprF::Err(e, items) => ExprF::Err(
+                e,
+                items
+                    .into_iter()
+                    .map(|x| Box::new(go(*x, ctx, defs)))
+                    .collect(),
+            ),
             ExprF::Lambda {
                 name,
                 param_ty,
@@ -665,15 +689,15 @@ pub fn replace_defs(expr: SpannedNamedExpr, defs: &mut Defs) -> SpannedNamedExpr
             ExprF::Type => ExprF::Type,
             ExprF::Builtin(s) => ExprF::Builtin(s),
         };
-        SpannedExpr((new, expr.0.1))
+        SpannedGExpr((new, expr.0.1))
     }
     go(expr, &mut Vec::new(), defs)
 }
 
 pub fn add_defs(items: Vec<Def>, defs: &mut Defs) {
     for item in items {
-        let expr = replace_defs(item.expr, defs);
-        defs.push((item.name, expr));
+        let expr = replace_defs(item.1, defs);
+        defs.push((item.0, expr));
     }
 }
 
@@ -736,7 +760,7 @@ pub fn create_tuple(
 ) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
     let items_len = items.len();
     // the f in the function body
-    let f_var = SpannedExpr((
+    let f_var = SpannedGExpr((
         ExprF::Var {
             idx: VarKind::Idx(0 as usize),
         },
@@ -814,7 +838,7 @@ pub fn create_tuple(
         let acc = acc?;
         let binding = item.0;
 
-        Ok(SpannedExpr((
+        Ok(SpannedGExpr((
             ExprF::App {
                 func: Box::new(acc),
                 arg: Box::new(binding.val.clone()),
@@ -824,7 +848,7 @@ pub fn create_tuple(
     })?;
 
     // the R as the return type of f
-    let r_type = SpannedExpr((
+    let r_type = SpannedGExpr((
         ExprF::Var {
             idx: VarKind::Idx(items_len),
         },
@@ -838,7 +862,7 @@ pub fn create_tuple(
         .fold(Ok(r_type.clone()), |acc, item| {
             let binding = item.0;
 
-            Ok(SpannedExpr((
+            Ok(SpannedGExpr((
                 ExprF::Pi {
                     name: binding
                         .name
@@ -852,11 +876,11 @@ pub fn create_tuple(
             )))
         })?;
 
-    Ok(SpannedExpr((
+    Ok(SpannedGExpr((
         ExprF::Lambda {
             name: VarKind::Idx("".to_string()),
-            param_ty: Box::new(SpannedExpr((ExprF::Type, loc.clone()))),
-            body: Box::new(SpannedExpr((
+            param_ty: Box::new(SpannedGExpr((ExprF::Type, loc.clone()))),
+            body: Box::new(SpannedGExpr((
                 ExprF::Lambda {
                     name: VarKind::Idx("".to_string()),
                     param_ty: Box::new(f_type),
@@ -875,7 +899,7 @@ pub fn create_sigma(
     loc: Vec<usize>,
 ) -> Result<SpannedNamedExpr, ExprError<Vec<usize>>> {
     // the R as the return type of f
-    let r_type = SpannedExpr((
+    let r_type = SpannedGExpr((
         ExprF::Var {
             idx: VarKind::Idx(items.len()),
         },
@@ -888,7 +912,7 @@ pub fn create_sigma(
         .fold(Ok(r_type.clone()), |acc, item| {
             let binding = item.0?;
 
-            Ok(SpannedExpr((
+            Ok(SpannedGExpr((
                 ExprF::Pi {
                     name: binding
                         .name
@@ -902,15 +926,15 @@ pub fn create_sigma(
             )))
         })?;
 
-    Ok(SpannedExpr((
+    Ok(SpannedGExpr((
         ExprF::Pi {
             name: VarKind::Idx("".to_string()),
-            param_ty: Box::new(SpannedExpr((ExprF::Type, loc.clone()))),
-            ret_ty: Box::new(SpannedExpr((
+            param_ty: Box::new(SpannedGExpr((ExprF::Type, loc.clone()))),
+            ret_ty: Box::new(SpannedGExpr((
                 ExprF::Pi {
                     name: VarKind::Idx("".to_string()),
                     param_ty: Box::new(f_type),
-                    ret_ty: Box::new(SpannedExpr((
+                    ret_ty: Box::new(SpannedGExpr((
                         ExprF::Var {
                             idx: VarKind::Idx(1),
                         },

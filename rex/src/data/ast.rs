@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Range;
+use std::ops::RangeInclusive;
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -12,7 +13,10 @@ use thiserror::Error;
 
 use crate::Traverse;
 use crate::data::tokens::AbsoluteIndent;
-use crate::data::tokens::Token;
+use crate::data::tokens::GToken;
+use crate::data::tokens::ValidToken;
+use crate::helper::push_new;
+use crate::pipeline::desugar::iter_with_loc;
 
 // Later all idents will become syntactic sugar for indices
 
@@ -53,6 +57,7 @@ pub enum Ast<T> {
     // LetIn(String, T, T, T),
     // Pipe operator
     Pipe(Vec<T>),
+    Error(AstError, Vec<T>),
 }
 
 impl<T: Display> Display for Ast<T> {
@@ -75,6 +80,7 @@ impl<T: Display> Display for Ast<T> {
             Lambda(exprs) => join_fmt(f, exprs, " => "),
             Pipe(exprs) => join_fmt(f, exprs, " |> "),
             Group(expr) => write!(f, "({expr})"),
+            Hole => write!(f, "_"),
             // Module(deps, items) => {
             //     write!(f, "module(deps=[")?;
             //     join_fmt(f, deps, "\n")?;
@@ -128,6 +134,7 @@ impl<T: Clone> Ast<T> {
             | Ast::Ann(items)
             | Ast::Tuple(items)
             | Ast::Sigma(items)
+            | Ast::Error(_, items)
             | Ast::Pipe(items) => items.clone().into_iter().fold(init, f.clone()),
             // Ast::Module(items1, items2, ..) => items2
             //     .clone()
@@ -137,25 +144,16 @@ impl<T: Clone> Ast<T> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Functor, Error)]
-pub enum AstError<T> {
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum AstError {
     #[error("Invalid expression: found tokens {0:?}")]
-    InvalidExpr(Vec<Token<AbsoluteIndent>>),
+    InvalidExpr(Vec<ValidToken<AbsoluteIndent>>),
 
-    #[error("unexpected error")]
-    Other(Box<T>),
+    #[error("Unknown error")]
+    Unknown,
 
     #[error("Invalid expression: found tokens {0:?}")]
-    InvalidToken(Token<AbsoluteIndent>),
-}
-
-impl<T: Clone> AstError<T> {
-    pub fn fold<U>(&self, init: U, f: impl Fn(U, T) -> U + Clone) -> U {
-        match &self {
-            AstError::InvalidExpr(_) | AstError::InvalidToken(_) => init,
-            AstError::Other(a) => f(init, *a.clone()),
-        }
-    }
+    InvalidToken(ValidToken<AbsoluteIndent>),
 }
 
 #[derive(Debug, Clone)]
@@ -171,8 +169,22 @@ impl Display for FixAst {
 #[derive(Debug, Clone)]
 pub struct SpannedFixAst(pub Spanned<Ast<SpannedFixAst>>);
 
+pub fn traverse_list(
+    ast: Vec<SpannedFixAst>,
+    path: Vec<usize>,
+) -> anyhow::Result<Box<SpannedFixAst>> {
+    let mut iter = path.into_iter();
+    let Some(next) = iter.next() else {
+        bail!("path was completely empty")
+    };
+    let Some(ast) = ast.get(next) else {
+        bail!("index out of bounds: len: {} got: {}", ast.len(), next)
+    };
+    ast.clone().traverse(iter.collect())
+}
 impl Traverse for SpannedFixAst {
     type Span = Vec<usize>;
+
     fn traverse(self, path: Vec<usize>) -> anyhow::Result<Box<Self>> {
         let mut path = path.into_iter();
         let current = path.next();
@@ -186,8 +198,16 @@ impl Traverse for SpannedFixAst {
                     _ => bail!("invalid path in {:?}, cur: {:?} ", &self.0.0, cur),
                 },
 
-                Tuple(items) | Sigma(items) | App(items) | Ann(items) | Binding(items)
-                | Lambda(items) | Pi(items) | Pipe(items) | Dot(items) => {
+                Tuple(items)
+                | Sigma(items)
+                | App(items)
+                | Ann(items)
+                | Binding(items)
+                | Lambda(items)
+                | Pi(items)
+                | Pipe(items)
+                | Dot(items)
+                | Error(_, items) => {
                     if let Some(param) = items.get(cur) {
                         param.clone().traverse(path.collect())
                     } else {
@@ -244,18 +264,6 @@ impl Traverse for SpannedFixAst {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ResultAst(pub Result<Ast<ResultAst>, AstError<ResultAst>>);
-
-pub fn get_fix_ast(expr: SpannedResultAst) -> Result<SpannedFixAst, AstError<SpannedResultAst>> {
-    match expr.0.0 {
-        Ok(sugar) => sugar
-            .try_fmap(|child| get_fix_ast(child))
-            .map(|inner| SpannedFixAst((inner, expr.0.1))),
-        Err(e) => Err(e),
-    }
-}
-
 // enum SubtreeState {
 //     Partial(NormalSugarExpr),
 //     Recovered(Vec<NormalSugarExpr>),
@@ -275,19 +283,48 @@ pub fn get_fix_ast(expr: SpannedResultAst) -> Result<SpannedFixAst, AstError<Spa
 
 // Span is outside because the root expr also has a span. Box is inside because the root expr
 // doesn't need to be boxed.
-pub type Spanned<T> = (T, Range<usize>);
+pub type Spanned<T> = (T, RangeInclusive<usize>);
 
-#[derive(Clone)]
-pub struct SpannedResultAst(pub Spanned<Result<Ast<SpannedResultAst>, AstError<SpannedResultAst>>>);
-
-impl fmt::Debug for SpannedResultAst {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (inner, span) = &self.0;
-        match inner {
-            Ok(expr) => write!(f, "{:#?} @ {:?}", expr, span),
-            Err(err) => write!(f, "Error: {:#?} @ {:?}", err, span),
+pub fn search(ast: SpannedFixAst, loc: usize, cur_loc: Vec<usize>) -> Vec<Vec<usize>> {
+    use Ast::*;
+    let range = ast.0.1;
+    if range.contains(&loc) {
+        let mut locs = match ast.0.0.clone() {
+            Var(_) | Type | Unit | Lit(_) => vec![],
+            App(items)
+            | Dot(items)
+            | Ann(items)
+            | Binding(items)
+            | Lambda(items)
+            | Pi(items)
+            | Tuple(items)
+            | Sigma(items)
+            | Pipe(items)
+            | Error(_, items) => iter_with_loc(items, cur_loc.clone())
+                .map(|x| search(x.0, loc, x.1))
+                .reduce(|mut acc, e| {
+                    acc.extend(e);
+                    acc
+                })
+                .unwrap_or(Vec::new()),
+            Group(item) => search(*item, loc, push_new(cur_loc.clone(), 0)),
+        };
+        if locs.is_empty() {
+            locs.push(cur_loc)
         }
+        locs
+    } else {
+        vec![]
     }
+}
+
+pub fn search_list(ast: Vec<SpannedFixAst>, loc: usize) -> Vec<Vec<usize>> {
+    ast.clone()
+        .into_iter()
+        .enumerate()
+        .map(|(i, ast)| search(ast, loc, vec![i]))
+        .find(|x| !x.is_empty())
+        .unwrap_or(vec![])
 }
 
 //some of the worst code I have ever written

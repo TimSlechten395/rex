@@ -1,5 +1,13 @@
-use rex::{lexer::Spanned, lexer::Token};
-use tower_lsp_server::lsp_types::{Position, Range};
+use anyhow::bail;
+use rex::data::{
+    ast::SpannedFixAst,
+    expr::NamedDefs,
+    tokens::{self, GToken, Spanned, Token},
+};
+use ropey::Rope;
+use tower_lsp_server::lsp_types::{Position, Range, Uri};
+
+use crate::Backend;
 
 pub fn char_to_pos(text: &ropey::Rope, char: usize) -> (usize, usize) {
     let line = text.char_to_line(char);
@@ -23,19 +31,32 @@ pub fn span_to_range(text: &ropey::Rope, span: std::ops::Range<usize>) -> Range 
     }
 }
 
-// ah yes a random function that does something
-pub fn map_index<E>(v: &[Spanned<Result<Token, E>>], n: usize) -> Option<usize> {
-    if n >= v.len() {
-        return None; // out of bounds
-    }
-    if !matches!(v[n], (Ok(Token::RealToken(_)), _)) {
-        return None; // the element at n doesn't exist in the filtered Vec
-    }
+// map validToken index to token index
 
-    // Count how many `Some`s before `n`
-    let new_index = v[..n]
-        .iter()
-        .filter(|x| matches!(x, (Ok(Token::RealToken(_)), _)))
-        .count();
-    Some(new_index)
+pub fn get_text(backend: &Backend, uri: &Uri) -> anyhow::Result<Rope> {
+    let Some(text) = backend.files.get(&uri) else {
+        bail!("Failed to get file");
+    };
+    Ok(text.clone())
+}
+
+pub fn get_tokens(backend: &Backend, uri: &Uri) -> anyhow::Result<Vec<tokens::Spanned<Token>>> {
+    let Some(tokens) = backend.tokens.get(&uri) else {
+        bail!("Failed to get file");
+    };
+    Ok(tokens.clone())
+}
+
+pub fn get_ast(backend: &Backend, uri: &Uri) -> anyhow::Result<Vec<SpannedFixAst>> {
+    let Some(ast) = backend.asts.get(&uri) else {
+        bail!("Failed to get ast");
+    };
+    Ok(ast.clone())
+}
+
+pub fn get_named_defs(backend: &Backend, uri: &Uri) -> anyhow::Result<NamedDefs> {
+    let Some(expr) = backend.named_exprs.get(&uri) else {
+        bail!("Failed to get expr");
+    };
+    Ok(expr.clone())
 }

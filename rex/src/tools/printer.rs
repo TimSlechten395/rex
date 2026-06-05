@@ -2,7 +2,6 @@ use std::fmt::format;
 
 use crate::{
     data::expr::{Expr, ExprF, NamedExpr, VarKind},
-    def::Defs,
     helper::push_new,
 };
 
@@ -43,80 +42,79 @@ fn maybe_parens(
     if needs_parens { format!("({})", s) } else { s }
 }
 
-pub fn print_named_expr(
-    code: NamedExpr,
-    prec: Prec,
-    assoc: Option<Assoc>,
-    is_right_child: bool,
-) -> String {
-    use ExprF::*;
+pub fn print_named_expr(code: NamedExpr) -> String {
+    fn go(code: NamedExpr, prec: Prec, assoc: Option<Assoc>, is_right_child: bool) -> String {
+        use ExprF::*;
 
-    match code.0 {
-        Builtin(s) => match s {
-            crate::data::expr::Builtin::String(s) => format!("\"{}\"", s),
-            s => "__something builtin__".to_string(),
-        },
-        Var { idx } => match idx {
-            VarKind::Named(s) => s,
-            VarKind::Idx(i) => i.to_string(),
-        },
+        match code.0 {
+            Err(..) => "err".to_string(),
+            Builtin(s) => match s {
+                crate::data::expr::Builtin::String(s) => format!("\"{}\"", s),
+                s => "__something builtin__".to_string(),
+            },
+            Var { idx } => match idx {
+                VarKind::Named(s) => s,
+                VarKind::Idx(i) => i.to_string(),
+            },
 
-        Type => "Type".to_string(),
+            Type => "Type".to_string(),
 
-        App { func, arg } => {
-            let (my_prec, my_assoc) = (Prec::APP, Some(Assoc::Left));
-            let s = format!(
-                "{} {}",
-                print_named_expr(*func, my_prec, my_assoc, false),
-                print_named_expr(*arg, my_prec, my_assoc, true)
-            );
-            maybe_parens(s, my_prec, prec, assoc, is_right_child)
-        }
+            App { func, arg } => {
+                let (my_prec, my_assoc) = (Prec::APP, Some(Assoc::Left));
+                let s = format!(
+                    "{} {}",
+                    go(*func, my_prec, my_assoc, false),
+                    go(*arg, my_prec, my_assoc, true)
+                );
+                maybe_parens(s, my_prec, prec, assoc, is_right_child)
+            }
 
-        Lambda {
-            name,
-            param_ty,
-            body,
-        } => {
-            let (my_prec, my_assoc) = (Prec::LAMBDA, Some(Assoc::Right));
-            let body_print = print_named_expr(*body, my_prec, my_assoc, true);
+            Lambda {
+                name,
+                param_ty,
+                body,
+            } => {
+                let (my_prec, my_assoc) = (Prec::LAMBDA, Some(Assoc::Right));
+                let body_print = go(*body, my_prec, my_assoc, true);
 
-            let s = match name {
-                VarKind::Named(name) => {
-                    let param_ty_print = print_named_expr(*param_ty, Prec::LOWEST, my_assoc, false);
-                    format!("({}: {}) => {}", name, param_ty_print, body_print)
-                }
-                VarKind::Idx(_) => {
-                    let param_ty_print = print_named_expr(*param_ty, my_prec, my_assoc, false);
-                    format!("{} => {}", param_ty_print, body_print)
-                }
-            };
+                let s = match name {
+                    VarKind::Named(name) => {
+                        let param_ty_print = go(*param_ty, Prec::LOWEST, my_assoc, false);
+                        format!("({}: {}) => {}", name, param_ty_print, body_print)
+                    }
+                    VarKind::Idx(_) => {
+                        let param_ty_print = go(*param_ty, my_prec, my_assoc, false);
+                        format!("{} => {}", param_ty_print, body_print)
+                    }
+                };
 
-            maybe_parens(s, my_prec, prec, assoc, is_right_child)
-        }
+                maybe_parens(s, my_prec, prec, assoc, is_right_child)
+            }
 
-        Pi {
-            name,
-            param_ty,
-            ret_ty,
-        } => {
-            let (my_prec, my_assoc) = (Prec::PI, Some(Assoc::Right));
-            let ret_ty_print = print_named_expr(*ret_ty, my_prec, my_assoc, true);
+            Pi {
+                name,
+                param_ty,
+                ret_ty,
+            } => {
+                let (my_prec, my_assoc) = (Prec::PI, Some(Assoc::Right));
+                let ret_ty_print = go(*ret_ty, my_prec, my_assoc, true);
 
-            let s = match name {
-                VarKind::Named(name) => {
-                    let param_ty_print = print_named_expr(*param_ty, Prec::LOWEST, my_assoc, false);
-                    format!("({}: {}) -> {}", name, param_ty_print, ret_ty_print)
-                }
-                VarKind::Idx(_) => {
-                    let param_ty_print = print_named_expr(*param_ty, my_prec, my_assoc, false);
-                    format!("{} -> {}", param_ty_print, ret_ty_print)
-                }
-            };
+                let s = match name {
+                    VarKind::Named(name) => {
+                        let param_ty_print = go(*param_ty, Prec::LOWEST, my_assoc, false);
+                        format!("({}: {}) -> {}", name, param_ty_print, ret_ty_print)
+                    }
+                    VarKind::Idx(_) => {
+                        let param_ty_print = go(*param_ty, my_prec, my_assoc, false);
+                        format!("{} -> {}", param_ty_print, ret_ty_print)
+                    }
+                };
 
-            maybe_parens(s, my_prec, prec, assoc, is_right_child)
+                maybe_parens(s, my_prec, prec, assoc, is_right_child)
+            }
         }
     }
+    go(code, Prec::LOWEST, None, false)
 }
 
 fn is_church(expr: &Expr) -> Option<usize> {
@@ -191,6 +189,7 @@ pub fn print_expr(code: Expr) -> String {
         }
 
         match code.0 {
+            Err(..) => "err".to_string(),
             Builtin(s) => match s {
                 crate::data::expr::Builtin::String(s) => format!("\"{}\"", s),
                 s => "__something builtin__".to_string(),

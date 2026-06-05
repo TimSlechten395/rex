@@ -29,6 +29,9 @@ pub enum TypeError<T> {
     // must be Type: Type
     #[error("{0:?} is not a type")]
     NotAType(T),
+
+    #[error("Unknown")]
+    Unknown(T),
 }
 
 // pub fn err_with_nodes(err: TypeError<ExprId>, sea: &SeaOfNodes) -> Option<TypeError<Expr>> {
@@ -108,7 +111,10 @@ pub fn infer_type(
     ty_errors: &mut Vec<TypeError<(Expr, Vec<usize>)>>,
     loc: Vec<usize>,
 ) -> Result<Expr, TypeError<(Expr, Vec<usize>)>> {
-    let ty: ExprF<_, _, _> = match expr.0 {
+    let ty: ExprF<_, _, _, _> = match expr.0 {
+        ExprF::Err(..) => {
+            return Err(TypeError::Unknown((expr, loc.clone())));
+        }
         ExprF::Builtin(b) => match b {
             Builtin::String(_) => ExprF::Builtin(Builtin::StringTy),
             Builtin::StringTy => ExprF::Type,

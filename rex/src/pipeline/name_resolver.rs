@@ -2,22 +2,49 @@ use functor_derive::Functor;
 
 use crate::{
     Compile,
-    data::expr::{Builtin, Expr, ExprF, GExpr, NamedExpr, VarKind},
-    def::Defs,
+    data::expr::{
+        Builtin, Defs, Expr, ExprError, ExprF, GDef, GDefs, GExpr, NamedDef, NamedDefs, NamedExpr,
+        SpannedExpr, SpannedGExpr, SpannedNamedExpr, VarKind,
+    },
     helper::push_new,
+    pipeline::desugar::{iter_with_loc, replace_defs},
 };
 
 pub struct NameResolver;
 
 impl Compile for NameResolver {
-    type Input = NamedExpr;
+    type Input = NamedDefs;
 
-    type Output = Expr;
+    type Output = Defs;
 
     type Error = ResolveError<(Vec<usize>, Context)>;
 
     fn run(input: Self::Input) -> Result<Self::Output, Self::Error> {
-        to_indices(input)
+        let defs: Vec<NamedDef> =
+            input
+                .0
+                .into_iter()
+                .fold(Vec::new(), |mut defs, GDef { name, ty, val }| {
+                    let just_defs = defs
+                        .clone()
+                        .into_iter()
+                        .map(|GDef { name, ty: _, val }| (name, val))
+                        .collect();
+                    let val = replace_defs(val, &just_defs);
+                    let ty = ty.map(|x| replace_defs(x, &just_defs));
+                    defs.push(GDef { name, ty, val });
+                    defs
+                });
+
+        let defs = defs
+            .into_iter()
+            .map(|GDef { name, ty, val }| {
+                let ty = ty.map(|x| to_indices(x));
+                let val = to_indices(val);
+                GDef { name, ty, val }
+            })
+            .collect();
+        Ok(GDefs(defs))
     }
 }
 
@@ -37,33 +64,35 @@ pub enum ResolveError<T> {
 }
 
 // zipper needed
-pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Context)>> {
-    fn go(
-        expr: NamedExpr,
-        env: &mut Context,
-        loc: Vec<usize>,
-    ) -> Result<Expr, ResolveError<(Vec<usize>, Context)>> {
-        let expr = match expr.0 {
+pub fn to_indices(expr: SpannedNamedExpr) -> SpannedExpr {
+    fn go(expr: SpannedNamedExpr, env: &mut Context, loc: Vec<usize>) -> SpannedExpr {
+        let new_expr = match expr.0.0 {
+            ExprF::Err(e, items) => {
+                let items = iter_with_loc(items, loc)
+                    .map(|(x, loc)| Box::new(go(*x, env, loc)))
+                    .collect();
+                ExprF::Err(e, items)
+            }
             ExprF::Var { idx: x } => match x {
                 VarKind::Named(x) => {
                     if let Some(pos) = resolve(x.clone(), env) {
                         ExprF::Var { idx: pos }
                     } else {
-                        return Err(ResolveError::ResolveFailed(x, (loc, env.clone())));
+                        ExprF::Err(ExprError::ResolveFailed(x, (loc, env.clone())), vec![])
                     }
                 }
                 VarKind::Idx(i) => ExprF::Var { idx: i },
             },
             ExprF::App { func, arg } => ExprF::App {
-                func: Box::new(go(*func, env, push_new(loc.clone(), 0))?),
-                arg: Box::new(go(*arg, env, push_new(loc.clone(), 1))?),
+                func: Box::new(go(*func, env, push_new(loc.clone(), 0))),
+                arg: Box::new(go(*arg, env, push_new(loc.clone(), 1))),
             },
             ExprF::Lambda {
                 name,
                 param_ty,
                 body,
             } => {
-                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0))?);
+                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0)));
                 env.push(name.clone());
 
                 let name = match name {
@@ -73,7 +102,7 @@ pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Con
                 let res = ExprF::Lambda {
                     name,
                     param_ty,
-                    body: Box::new(go(*body, env, push_new(loc.clone(), 1))?),
+                    body: Box::new(go(*body, env, push_new(loc.clone(), 1))),
                 };
                 env.pop();
                 res
@@ -83,7 +112,7 @@ pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Con
                 param_ty,
                 ret_ty,
             } => {
-                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0))?);
+                let param_ty = Box::new(go(*param_ty, env, push_new(loc.clone(), 0)));
                 env.push(name.clone());
 
                 let name = match name {
@@ -93,7 +122,7 @@ pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Con
                 let res = ExprF::Pi {
                     name,
                     param_ty,
-                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc.clone(), 1))?),
+                    ret_ty: Box::new(go(*ret_ty, env, push_new(loc.clone(), 1))),
                 };
                 env.pop();
                 res
@@ -101,7 +130,7 @@ pub fn to_indices(expr: NamedExpr) -> Result<Expr, ResolveError<(Vec<usize>, Con
             ExprF::Type => ExprF::Type,
             ExprF::Builtin(s) => ExprF::Builtin(s),
         };
-        Ok(GExpr(expr))
+        SpannedGExpr((new_expr, expr.0.1))
     }
     go(expr, &mut Vec::new(), Vec::new())
 }
