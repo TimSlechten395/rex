@@ -42,18 +42,18 @@ fn maybe_parens(
     if needs_parens { format!("({})", s) } else { s }
 }
 
-pub fn print_named_expr(code: NamedExpr) -> String {
-    fn go(code: NamedExpr, prec: Prec, assoc: Option<Assoc>, is_right_child: bool) -> String {
+pub fn print_named_expr(code: &NamedExpr) -> String {
+    fn go(code: &NamedExpr, prec: Prec, assoc: Option<Assoc>, is_right_child: bool) -> String {
         use ExprF::*;
 
-        match code.0 {
+        match &code.0 {
             Err(..) => "err".to_string(),
             Builtin(s) => match s {
                 crate::data::expr::Builtin::String(s) => format!("\"{}\"", s),
                 s => "__something builtin__".to_string(),
             },
             Var { idx } => match idx {
-                VarKind::Named(s) => s,
+                VarKind::Named(s) => s.clone(),
                 VarKind::Idx(i) => i.to_string(),
             },
 
@@ -63,8 +63,8 @@ pub fn print_named_expr(code: NamedExpr) -> String {
                 let (my_prec, my_assoc) = (Prec::APP, Some(Assoc::Left));
                 let s = format!(
                     "{} {}",
-                    go(*func, my_prec, my_assoc, false),
-                    go(*arg, my_prec, my_assoc, true)
+                    go(&func, my_prec, my_assoc, false),
+                    go(&arg, my_prec, my_assoc, true)
                 );
                 maybe_parens(s, my_prec, prec, assoc, is_right_child)
             }
@@ -75,15 +75,15 @@ pub fn print_named_expr(code: NamedExpr) -> String {
                 body,
             } => {
                 let (my_prec, my_assoc) = (Prec::LAMBDA, Some(Assoc::Right));
-                let body_print = go(*body, my_prec, my_assoc, true);
+                let body_print = go(&body, my_prec, my_assoc, true);
 
                 let s = match name {
                     VarKind::Named(name) => {
-                        let param_ty_print = go(*param_ty, Prec::LOWEST, my_assoc, false);
+                        let param_ty_print = go(&param_ty, Prec::LOWEST, my_assoc, false);
                         format!("({}: {}) => {}", name, param_ty_print, body_print)
                     }
                     VarKind::Idx(_) => {
-                        let param_ty_print = go(*param_ty, my_prec, my_assoc, false);
+                        let param_ty_print = go(&param_ty, my_prec, my_assoc, false);
                         format!("{} => {}", param_ty_print, body_print)
                     }
                 };
@@ -97,15 +97,15 @@ pub fn print_named_expr(code: NamedExpr) -> String {
                 ret_ty,
             } => {
                 let (my_prec, my_assoc) = (Prec::PI, Some(Assoc::Right));
-                let ret_ty_print = go(*ret_ty, my_prec, my_assoc, true);
+                let ret_ty_print = go(&ret_ty, my_prec, my_assoc, true);
 
                 let s = match name {
                     VarKind::Named(name) => {
-                        let param_ty_print = go(*param_ty, Prec::LOWEST, my_assoc, false);
+                        let param_ty_print = go(&param_ty, Prec::LOWEST, my_assoc, false);
                         format!("({}: {}) -> {}", name, param_ty_print, ret_ty_print)
                     }
                     VarKind::Idx(_) => {
-                        let param_ty_print = go(*param_ty, my_prec, my_assoc, false);
+                        let param_ty_print = go(&param_ty, my_prec, my_assoc, false);
                         format!("{} -> {}", param_ty_print, ret_ty_print)
                     }
                 };
@@ -174,9 +174,9 @@ fn count_apps(expr: &Expr) -> Option<usize> {
     }
 }
 
-pub fn print_expr(code: Expr) -> String {
+pub fn print_expr(code: &Expr) -> String {
     pub fn go(
-        code: Expr,
+        code: &Expr,
         prec: Prec,
         assoc: Option<Assoc>,
         is_right_child: bool,
@@ -188,14 +188,15 @@ pub fn print_expr(code: Expr) -> String {
             return n.to_string();
         }
 
-        match code.0 {
+        match &code.0 {
             Err(..) => "err".to_string(),
             Builtin(s) => match s {
                 crate::data::expr::Builtin::String(s) => format!("\"{}\"", s),
-                s => "__something builtin__".to_string(),
+                crate::data::expr::Builtin::Fix => "fix".to_string(),
+                _ => "__something builtin__".to_string(),
             },
             Var { idx } => {
-                let name = ctx.iter().rev().nth(idx);
+                let name = ctx.iter().rev().nth(*idx);
                 if let Some(name) = name
                     && !name.is_empty()
                 {
@@ -211,8 +212,8 @@ pub fn print_expr(code: Expr) -> String {
                 let (my_prec, my_assoc) = (Prec::APP, Some(Assoc::Left));
                 let s = format!(
                     "{} {}",
-                    go(*func, my_prec, my_assoc, false, ctx),
-                    go(*arg, my_prec, my_assoc, true, ctx)
+                    go(func, my_prec, my_assoc, false, ctx),
+                    go(arg, my_prec, my_assoc, true, ctx)
                 );
                 maybe_parens(s, my_prec, prec, assoc, is_right_child)
             }
@@ -223,10 +224,10 @@ pub fn print_expr(code: Expr) -> String {
                 body,
             } => {
                 let (my_prec, my_assoc) = (Prec::LAMBDA, Some(Assoc::Right));
-                let param_ty = go(*param_ty, my_prec, my_assoc, false, ctx);
+                let param_ty = go(param_ty, my_prec, my_assoc, false, ctx);
 
                 ctx.push(name.clone());
-                let body = go(*body, my_prec, my_assoc, true, ctx);
+                let body = go(body, my_prec, my_assoc, true, ctx);
                 ctx.pop();
 
                 let s = if !name.is_empty() {
@@ -244,10 +245,10 @@ pub fn print_expr(code: Expr) -> String {
                 ret_ty,
             } => {
                 let (my_prec, my_assoc) = (Prec::PI, Some(Assoc::Right));
-                let param_ty = go(*param_ty, my_prec, my_assoc, false, ctx);
+                let param_ty = go(param_ty, my_prec, my_assoc, false, ctx);
 
                 ctx.push(name.clone());
-                let ret_ty = go(*ret_ty, my_prec, my_assoc, true, ctx);
+                let ret_ty = go(ret_ty, my_prec, my_assoc, true, ctx);
                 ctx.pop();
 
                 let s = if !name.is_empty() {

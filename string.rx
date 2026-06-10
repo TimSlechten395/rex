@@ -1,1 +1,20 @@
-"hello"
+def Bit := (R: Type) -> R -> R -> R
+
+def t := (R: Type) => (t: R) => (f: R) => t
+
+def f := (R: Type) => (t: R) => (f: R) => f
+
+def List := (A: Type) => (R: Type) -> (A -> R -> R) -> R -> R
+
+def Functor := (F: Type -> Type) => (A: Type) => (B: Type) => (A -> B) -> F A -> F B
+def Nat :=  (R: Type) -> (R -> R) -> R -> R
+
+def Array := (A: Type) => (n: Nat) => (R: Type) -> n Type ((X: Type) => (A -> X)) R -> R
+
+def Byte := Array Bit 8
+
+def example: Byte := (R: Type) => (byte: 8 Type ((X: Type) => (Bit -> X)) R) => byte t t f t f f f t
+
+def String := List Byte
+
+def map_string := (g: Byte -> Byte) => (s: String) => (R: Type) => (f: Byte -> R -> R) => (z: R) => s R ((b: Byte) => f (g b)) z

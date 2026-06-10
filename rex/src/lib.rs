@@ -10,7 +10,7 @@ use crate::data::expr::{Defs, Expr, ExprError, ExprF, GDef, GExpr, NamedExpr, tr
 use crate::data::tokens::{
     self, AbsoluteIndent, GToken, result_tok_span_to_char_span, tok_span_to_result_tok_span,
 };
-use crate::eval::normal_form;
+use crate::eval::{normal_form, weak_head_normal_form};
 use crate::pipeline::desugar::{Binding, Desugar, replace_defs};
 use crate::pipeline::lexer::Lexer;
 
@@ -123,22 +123,17 @@ pub fn compile(
         .filter_map(|(i, GDef { name, ty, val })| {
             let mut ty_errors = Vec::new();
             let ty_errors = {
-                match infer_type(
-                    val.clone().remove_span(),
-                    Vec::new(),
-                    &mut ty_errors,
-                    vec![i, 1],
-                ) {
+                match infer_type(&val.remove_span(), Vec::new(), &mut ty_errors, vec![i, 2]) {
                     Ok(inf) => {
                         if let Some(ty) = ty {
                             // TODO: fix span
-                            let exp = ty.clone().remove_span();
+                            let exp = ty.remove_span();
 
-                            if !eq(inf.clone(), exp.clone()) {
+                            if !eq(&inf.clone(), &exp.clone()) {
                                 ty_errors.push(TypeError::TypeMismatch {
-                                    expected: (normal_form(exp.clone()), vec![i, 0]),
+                                    expected: (weak_head_normal_form(&exp), vec![i, 1]),
                                     //
-                                    found: (normal_form(inf.clone()), vec![i, 1]),
+                                    found: (weak_head_normal_form(&inf), vec![i, 2]),
                                 });
                                 // println!(
                                 //     "Type Mismatch with annotation in '{}':\n\texpected: '{}'\n\tfound   : '{}'",

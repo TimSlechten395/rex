@@ -152,7 +152,7 @@ pub enum AstError {
     #[error("Unknown error")]
     Unknown,
 
-    #[error("Invalid expression: found tokens {0:?}")]
+    #[error("Invalid token: found tokens {0:?}")]
     InvalidToken(ValidToken<AbsoluteIndent>),
 }
 

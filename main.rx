@@ -1,0 +1,1 @@
+def Main: Type := fix ((R: Type) => (s: String) -> Pair String (Option R))

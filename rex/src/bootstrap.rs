@@ -41,6 +41,7 @@ fn read_kv_file(path: &str) -> anyhow::Result<HashMap<String, String>> {
 }
 
 pub fn compile_min_version(code: &str) -> anyhow::Result<Vec<(String, Expr)>> {
+    // dbg!(code);
     let output = std::process::Command::new(&LazyLock::force(&PREV_COMPILER))
         .arg("run")
         .arg("-b")

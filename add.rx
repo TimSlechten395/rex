@@ -1,0 +1,23 @@
+def unit (A: Type) (x: A) : A := x
+
+def Never: Type := (A: Type) -> A
+
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+
+def zero: Nat := (A: Type) => (f: A -> A) => (x: A) => x
+
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+
+def add (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
+
+
+def Sigma (A: Type) (B: A -> Type): Type := (C: Type) -> ((a: A) -> B a -> C) -> C
+def sigma (A: Type) (B: A -> Type) (a: A) (b: B a): Sigma A B := (C: Type) => (f: (a: A) -> B a -> C) => f a b
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+def add_returns_proof (n: Nat) (m: Nat) : Sigma Nat ((r: Nat) => Eq Nat r ((A: Type) => (f: A -> A) => (x: A) => m A f (n A f x))) := sigma Nat ((r: Nat) => Eq Nat r ((A: Type) => (f: A -> A) => (x: A) => m A f (n A f x))) ((A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)) (refl Nat ((A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)))
+def add_with_proof: Sigma (Nat -> Nat -> Nat) ((other_add: Nat -> Nat -> Nat) => Eq (Nat -> Nat -> Nat) other_add ((n: Nat) => (m: Nat) => (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x))) := sigma (Nat -> Nat -> Nat) ((other_add: Nat -> Nat -> Nat) => Eq (Nat -> Nat -> Nat) other_add ((n: Nat) => (m: Nat) => (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x))) add (refl (Nat -> Nat -> Nat) add)
+
+

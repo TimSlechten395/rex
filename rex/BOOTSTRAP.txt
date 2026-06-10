@@ -1,1 +1,1 @@
-min_version = v0.1.2
+min_version = v0.1.3

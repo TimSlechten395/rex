@@ -1,0 +1,6 @@
+
+def Error (T: Type): Type := (R: Type) -> (rec: T -> R) -> (base: R) -> R
+// expands to Error (fix Type Error)
+def Fix_error: Type := fix Type Error 
+def base: Fix_error := (R: Type) => (rec: Fix_error -> R) => (base: R) => base
+

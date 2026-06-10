@@ -1,0 +1,3 @@
+
+def never (A: Type) : A := fix A ((a: A) => a)
+

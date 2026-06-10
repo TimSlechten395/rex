@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use num_bigint::BigUint;
 
@@ -9,7 +9,7 @@ use crate::{
         ast::{Ast, FixAst, LitKind},
         expr::{
             Builtin, ExprError, ExprF, GDef, GDefs, GExpr, NamedDefs, NamedExpr, Spanned,
-            SpannedGExpr, SpannedNamedExpr, VarKind,
+            SpannedGExpr, SpannedNamedExpr, VarKind, to_named,
         },
     },
     helper::push_new,
@@ -103,40 +103,48 @@ pub fn create_church_num(num: BigUint) -> NamedExpr {
             .unwrap_or(&(0 as u64))
     {
         body = GExpr(ExprF::App {
-            func: Box::new(GExpr(ExprF::Var {
+            func: Rc::new(GExpr(ExprF::Var {
                 idx: VarKind::Idx(1),
             })),
-            arg: Box::new(body),
+            arg: Rc::new(body),
         });
     }
 
     GExpr(ExprF::Lambda {
         name: VarKind::Idx("".to_string()),
-        param_ty: Box::new(GExpr(ExprF::Type)),
-        body: Box::new(GExpr(ExprF::Lambda {
+        param_ty: Rc::new(GExpr(ExprF::Type)),
+        body: Rc::new(GExpr(ExprF::Lambda {
             name: VarKind::Idx("".to_string()),
-            param_ty: Box::new(GExpr(ExprF::Pi {
+            param_ty: Rc::new(GExpr(ExprF::Pi {
                 name: VarKind::Idx("".to_string()),
-                param_ty: Box::new(GExpr(ExprF::Var {
+                param_ty: Rc::new(GExpr(ExprF::Var {
                     idx: VarKind::Idx(0),
                 })),
-                ret_ty: Box::new(GExpr(ExprF::Var {
+                ret_ty: Rc::new(GExpr(ExprF::Var {
                     idx: VarKind::Idx(1),
                 })),
             })),
-            body: Box::new(GExpr(ExprF::Lambda {
+            body: Rc::new(GExpr(ExprF::Lambda {
                 name: VarKind::Idx("".to_string()),
-                param_ty: Box::new(GExpr(ExprF::Var {
+                param_ty: Rc::new(GExpr(ExprF::Var {
                     idx: VarKind::Idx(1),
                 })),
-                body: Box::new(body),
+                body: Rc::new(body),
             })),
         })),
     })
 }
 
 pub fn create_string(s: String) -> NamedExpr {
-    let defs = "
+    let bytes: Vec<String> = s
+        .clone()
+        .into_bytes()
+        .into_iter()
+        .map(create_char)
+        .collect();
+    let bytes = create_list(bytes);
+
+    let defs = format!("
     def Bit := (R: Type) -> R -> R -> R
     def t := (R: Type) => (t: R) => (f: R) => t
     def f := (R: Type) => (t: R) => (f: R) => f
@@ -144,15 +152,46 @@ pub fn create_string(s: String) -> NamedExpr {
     def Functor := (F: Type -> Type) => (A: Type) => (B: Type) => (A -> B) -> F A -> F B
     def Nat :=  (R: Type) -> (R -> R) -> R -> R
     def Array := (A: Type) => (n: Nat) => (R: Type) -> n Type ((X: Type) => (A -> X)) R -> R
+    def map_string := (g: Byte -> Byte) => (s: String) => (R: Type) => (f: Byte -> R -> R) => (z: R) => s R ((b: Byte) => f (g b)) z
     def Byte := Array Bit 8
     def String := List Byte
-    def map_string := (g: Byte -> Byte) => (s: String) => (R: Type) => (f: Byte -> R -> R) => (z: R) => s R ((b: Byte) => f (g b)) z
-    
+    def my_string: String := (R: Type) => (c: Byte -> R -> R) => (b: R) => {}
 
-";
+", bytes);
+    let string = compile_min_version(&defs)
+        .unwrap()
+        .into_iter()
+        .rev()
+        .next()
+        .unwrap()
+        .1;
+    println!("{:?}", string);
+    to_named(&string)
+}
 
-    let bytes = s.clone().into_bytes();
-    todo!("implement string literals: {s}")
+pub fn create_list(bytes: Vec<String>) -> String {
+    let mut acc = "b".to_string();
+    for byte in bytes.into_iter().rev() {
+        acc = format!("c {} ({})", byte, acc);
+    }
+    acc
+}
+
+pub fn create_char(ascii: u8) -> String {
+    let mut bytes = vec![];
+    for i in 0..8 {
+        let bit = (ascii >> i) & 1;
+        bytes.push(bit);
+    }
+    let bytes = bytes.iter().fold(String::new(), |b, i| {
+        let i = if *i == 1 { "t" } else { "f" };
+        b.to_string() + " " + &i.to_string()
+    });
+
+    format!(
+        "((R: Type) => (byte: 8 Type ((X: Type) => (Bit -> X)) R) => byte{})",
+        bytes
+    )
 }
 
 pub fn create_accessor(arity: usize, selected: usize) -> NamedExpr {
@@ -166,8 +205,8 @@ pub fn create_accessor(arity: usize, selected: usize) -> NamedExpr {
     for _ in 0..arity {
         body = GExpr(ExprF::Lambda {
             name: VarKind::Idx("".to_string()),
-            param_ty: Box::new(GExpr(ExprF::Type)),
-            body: Box::new(body),
+            param_ty: Rc::new(GExpr(ExprF::Type)),
+            body: Rc::new(body),
         });
     }
 
@@ -387,8 +426,8 @@ pub fn extract_binding(
     Ok(binding)
 }
 
-pub fn with_const_span(x: NamedExpr, loc: Vec<usize>) -> SpannedNamedExpr {
-    let x = match x.0 {
+pub fn with_const_span(x: &NamedExpr, loc: Vec<usize>) -> SpannedNamedExpr {
+    let x = match x.clone().0 {
         ExprF::Var { idx } => ExprF::Var { idx },
         ExprF::App { func, arg } => ExprF::App { func, arg },
         ExprF::Lambda {
@@ -414,7 +453,7 @@ pub fn with_const_span(x: NamedExpr, loc: Vec<usize>) -> SpannedNamedExpr {
         ExprF::Err(expr_error, items) => ExprF::Err(expr_error, items),
     };
 
-    SpannedGExpr((x.fmap(|x| Box::new(with_const_span(*x, loc.clone()))), loc))
+    SpannedGExpr((x.fmap(|x| Box::new(with_const_span(&x, loc.clone()))), loc))
 }
 
 // This is the main function
@@ -452,13 +491,18 @@ pub fn desugar(expr: FixAst, loc: Vec<usize>) -> SpannedNamedExpr {
                 loc.clone(),
             ))),
         },
-        Var(name) => ExprF::Var {
-            idx: VarKind::Named(name),
+        Var(name) => match name.as_str() {
+            "fix" => ExprF::Builtin(Builtin::Fix),
+            "String" => ExprF::Builtin(Builtin::StringTy),
+            "_" => ExprF::Builtin(Builtin::TypeHole),
+            _ => ExprF::Var {
+                idx: VarKind::Named(name),
+            },
         },
         Lit(lit) => match lit {
             LitKind::Number(n) => {
                 let num = create_church_num(n);
-                return with_const_span(num, loc.clone());
+                return with_const_span(&num, loc.clone());
             }
             LitKind::String(s) => {
                 return SpannedGExpr((ExprF::Builtin(Builtin::String(s)), loc.clone()));

@@ -88,9 +88,9 @@ pub async fn document_highlight(
         })
         .flatten();
 
-    let expr_path = expr_path.unwrap();
+    let expr_path = expr_path.ok_or(anyhow::anyhow!("failed"))?;
 
-    if *expr_path.get(2).unwrap() == 1 {
+    if *expr_path.get(2).ok_or(anyhow::anyhow!("failed"))? == 1 {
         // got def
     } else {
         // got binding

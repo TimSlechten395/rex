@@ -1,0 +1,7 @@
+def Map (T: Type -> Type): Type := (A: Type) -> (B: Type) -> (A -> B) -> T A -> T B
+def Contra_map (T: Type -> Type): Type := (A: Type) -> (B: Type) ->  (B -> A) -> T A -> T B
+
+
+// this is the general map function it is saying that you can construct a map function for a pi A -> B if you have a contra_map for a and a map for b
+// in the future the compiler will be able to use this definition to derive map for any type
+def map (A: Type -> Type) (B: Type -> Type) (contra_map_a: Contra_map A) (map_b: Map B) (X: Type) (Y: Type) (f: X -> Y) (tp: A X -> B X): A Y -> B Y := (input: A Y) => map_b X Y f (tp (contra_map_a Y X f input))

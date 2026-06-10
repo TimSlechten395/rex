@@ -1,0 +1,146 @@
+def Unit: Type := (A: Type) -> A -> A
+def unit: Unit := (A: Type) => (x: A) => x
+
+def Never: Type := (A: Type) -> A
+
+// Natural numbers
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+def add (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
+
+def Pair (A: Type) (B: Type): Type := (C: Type) -> (A -> B -> C) -> C
+def pair (A: Type) (B: Type) (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B -> C) => f a b
+
+def Sigma (A: Type) (B: A -> Type): Type := (C: Type) -> ((a: A) -> B a -> C) -> C
+def sigma (A: Type) (B: A -> Type) (a: A) (b: B a): Sigma A B := (C: Type) => (f: (a: A) -> B a -> C) => f a b
+
+def Bool: Type := (A: Type) -> A -> A -> A
+def true: Bool := (A: Type) => (t: A) => (f: A) => t
+def false: Bool := (A: Type) => (t: A) => (f: A) => f
+
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+// <=
+def Le (n: Nat) (m: Nat): Type := Sigma Nat ((k: Nat) => Eq Nat (add n k) m)
+// >=
+def Ge (n: Nat) (m: Nat): Type := Le m n
+
+
+
+def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
+def left (A: Type) (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
+def right (A: Type) (B: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
+
+def Not (A: Type): Type := A -> Never
+def Dec (A: Type): Type := Either A (Not A)
+def Dec_eq (A: Type) (a: A) (b: A): Type := Dec (Eq A a b)
+
+def inc (x: Sigma Nat ((x: Nat) => Dec (Le x 10))): Nat :=
+    x Nat
+        ((num: Nat) => (smaller_dec: Dec (Le num 10)) => 
+            smaller_dec Nat
+            ((smaller: Le num 10) => succ num)
+                ((not_smaller: Not (Le num 10)) => num)
+        )
+
+def next: Nat := inc (sigma Nat ((num: Nat) => Dec (Le num 10)) 3 (left (Le 3 10) (Not (Le 3 10)) (sigma Nat ((k: Nat) => Eq Nat (add 3 k) 10) 7 (refl Nat 10))))
+// this 6 is the real problem as we do not know it automatically
+def next_eq_4: Nat := inc (sigma Nat ((num: Nat) => Dec (Le num 10)) next (left (Le next 10) (Not (Le next 10)) (sigma Nat ((k: Nat) => Eq Nat (add next k) 10) 6 (refl Nat 10))))
+
+// expr.rx----------------------------------------------------------------------------
+def Expr (A: Type) (B: Type) (T: Type): Type := (R: Type) -> (var: A -> R) -> (app: T -> T -> R) -> (lambda: B -> T -> T -> R) -> (pi: B -> T -> T -> R) -> (type: R) -> R
+
+
+def Empty_expr: Type -> Type := Expr Unit Unit
+def I_expr: Type -> Type := Expr Nat String
+
+def Named_expr: Type -> Type := Expr (Either Nat String) String
+
+
+def map_expr_T (A: Type) (B: Type) (T: Type) (expr: Expr A B T) (T2: Type) (f: T -> T2): Expr A B T2 := 
+    (R: Type) => (var: A -> R) => (app: T2 -> T2 -> R) => (lambda: B -> T2 -> T2 -> R) => (pi: B -> T2 -> T2 -> R) => (type: R) =>
+    expr R var ((t1: T) => (t2: T) => app (f t1) (f t2)) ((b: B) => (t1: T) => (t2: T) => lambda b (f t1) (f t2)) ((b: B) => (t1: T) => (t2: T) => pi b (f t1) (f t2)) type
+
+def map_expr_A (A: Type) (B: Type) (T: Type) (expr: Expr A B T) (A2: Type) (f: A -> A2): Expr A2 B T :=
+    (R: Type) => (var: A2 -> R) => (app: T -> T -> R) => (lambda: B -> T -> T -> R) => (pi: B -> T -> T -> R) => (type: R) =>
+    expr R ((idx: A) => var (f idx)) app lambda pi type
+
+def map_expr_B (A: Type) (B: Type) (T: Type) (expr: Expr A B T) (B2: Type) (f: B -> B2): Expr A B2 T :=
+    (R: Type) => (var: A -> R) => (app: T -> T -> R) => (lambda: B2 -> T -> T -> R) => (pi: B2 -> T -> T -> R) => (type: R) =>
+    expr R var app ((name: B) => lambda (f name)) ((name: B) => pi (f name)) type
+
+
+def Pair (A: Type) (B: Type): Type := (C: Type) -> (A -> B -> C) -> C
+def pair (A: Type) (B: Type) (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B -> C) => f a b
+
+def Pi (A: Type) (B: Type): Type := A -> B
+
+
+// R should be the type of one level up
+def Zipper (T: Type) (R: Type): Type := Pair T (T -> R)
+
+
+def expr_var (A: Type) (B: Type) (T: Type) (id: A): Expr A B T := (R: Type) => (var: A -> R) => (app: T -> T -> R) => (lambda: B -> T -> T -> R) => (pi: B -> T -> T -> R) => (type: R) => var id
+def expr_app (A: Type) (B: Type) (T: Type) (func: T) (arg: T): Expr A B T := (R: Type) => (var: A -> R) => (app: T -> T -> R) => (lambda: B -> T -> T -> R) => (pi: B -> T -> T -> R) => (type: R) => app func arg
+def expr_lambda (A: Type) (B: Type) (T: Type) (name: B) (param_ty: T) (body: T): Expr A B T := (R: Type) => (var: A -> R) => (app: T -> T -> R) => (lambda: B -> T -> T -> R) => (pi: B -> T -> T -> R) => (type: R) => lambda name param_ty body
+def expr_pi (A: Type) (B: Type) (T: Type) (name: B) (param_ty: T) (ret_ty: T): Expr A B T := (R: Type) => (var: A -> R) => (app: T -> T -> R) => (lambda: B -> T -> T -> R) => (pi: B -> T -> T -> R) => (type: R) => pi name param_ty ret_ty
+def expr_type (A: Type) (B: Type) (T: Type): Expr A B T := (R: Type) => (var: A -> R) => (app: T -> T -> R) => (lambda: B -> T -> T -> R) => (pi: B -> T -> T -> R) => (type: R) => type
+
+def i_expr_var (T: Type) (id: Nat): I_expr T := expr_var Nat String T id
+def i_expr_app (T: Type) (func: T) (arg: T): I_expr T := expr_app Nat String T func arg
+def i_expr_lambda (T: Type) (name: String) (param_ty: T) (body: T): I_expr T := expr_lambda Nat String T name param_ty body
+def i_expr_pi (T: Type) (name: String) (param_ty: T) (ret_ty: T): I_expr T := expr_pi Nat String T name param_ty ret_ty
+def i_expr_type (T: Type): I_expr T := expr_type Nat String T
+
+def named_expr_var (T: Type) (id: Either Nat String): Named_expr T := expr_var (Either Nat String) String T id
+def named_expr_app (T: Type) (func: T) (arg: T): Named_expr T := expr_app (Either Nat String) String T func arg
+def named_expr_lambda (T: Type) (name: String) (param_ty: T) (body: T): Named_expr T := expr_lambda (Either Nat String) String T name param_ty body
+def named_expr_pi (T: Type) (name: String) (param_ty: T) (ret_ty: T): Named_expr T := expr_pi (Either Nat String) String T name param_ty ret_ty
+def named_expr_type (T: Type): Named_expr T := expr_type (Either Nat String) String T
+
+def to_named (T: Type) (e: I_expr T): Named_expr T := map_expr_A Nat String T e (Either Nat String) ((idx: Nat) => left Nat String idx)
+
+
+def ty: fix Type I_expr := i_expr_type (fix Type I_expr)
+def var: fix Type I_expr := i_expr_var (fix Type I_expr) 3
+
+
+def simple: fix Type I_expr := i_expr_app (fix Type I_expr) ty ty
+
+def zip_expr: Zipper (fix Type I_expr) (fix Type I_expr) := pair (fix Type I_expr) ((fix Type I_expr) -> fix Type I_expr) simple ((e: fix Type I_expr) => i_expr_app (fix Type I_expr) e ty )
+
+def example: fix Type I_expr := i_expr_app (fix Type I_expr) (i_expr_lambda (fix Type I_expr) "hello" ty var) ty
+
+// eval.rx----------------------------------------------------------------------------
+
+
+// def with_proof: Nat -> Type := (cutoff: Nat) => (Sigma Nat ((idx: Nat) => Dec (Le idx cutoff)))
+// def I_expr_with_proof (cutoff: Nat): Type -> Type := Expr (with_proof cutoff) String
+
+
+// def shift (T: Type) (rec: Nat -> (cutoff: Nat) -> T -> T) (delta: Nat) (cutoff: Nat) (expr: I_expr_with_proof cutoff T): I_expr_with_proof cutoff T:= 
+// expr T
+//        ((idx: with_proof cutoff) => idx ((id: Nat) => (proof: Dec (Le id cutoff)) =>
+//            proof
+//                ((le: Le id cutoff) => expr_var (with_proof cutoff) String T (add id delta))
+//                ((not_le : Not (Le idx cutoff)) => expr_var (with_proof cutoff) String T idx not_le))
+//        ((name: String) => (param_ty: T) => (body: T) => expr_lambda (with_proof cutoff) String T name (rec delta cutoff param_ty) (rec delta (succ cutoff) param_ty))
+//        ((name: String) => (param_ty: T) => (ret_ty: T) => expr_pi (with_proof cutoff) String T name (rec delta cutoff param_ty) (rec delta (succ cutoff) param_ty))
+//        ((func: T) => (arg: T) => expr_app (with_proof cutoff) String T (rec delta cutoff func) (rec delta (succ cutoff arg)))
+//         (expr_type (with_proof cutoff) String))
+//
+//
+
+// def six: Nat := 
+
+// ty.rx----------------------------------------------------------------------------
+//
+
+
+def map_i_expr_B_unit (T: Type) (e: I_expr T): Expr Nat Unit T := map_expr_B Nat String T e Unit ((x: String) => unit)
+
+def eq (T: Type) (e1: I_expr T) (e2: I_expr T) (e1_eq_e2: Dec_eq (Expr Nat Unit T) (map_i_expr_B_unit T e1) (map_i_expr_B_unit T e2)): Bool := 
+    e1_eq_e2 Bool ((x: Eq (Expr Nat Unit T) (map_i_expr_B_unit T e1) (map_i_expr_B_unit T e2)) => true) ((x: Not (Eq (Expr Nat Unit T) (map_i_expr_B_unit T e1) (map_i_expr_B_unit T e2))) => false)
+

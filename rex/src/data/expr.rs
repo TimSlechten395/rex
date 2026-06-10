@@ -2,6 +2,7 @@ use core::fmt;
 use std::collections::HashMap;
 use std::fmt::{Debug, write};
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -46,66 +47,45 @@ pub enum Builtin {
     StringCmp,
     NumCmp,
     BoolCmp,
+    Fix,
+    TypeHole,
 }
 
-// Experimental: allow annotations everywhere and use them to derive missing types
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
-pub enum AnnExprF<T, A, B, E> {
-    Expr(ExprF<Option<T>, A, B, E>),
-    Ann(T, T),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Functor)]
-pub struct AnnExpr<A, B, E>(AnnExprF<Box<AnnExpr<A, B, E>>, A, B, E>);
-
-// this will require higher level unification but for now we will handle simple type annotations
-fn convert<A: Clone, B: Clone, E: Clone>(ann_expr: AnnExpr<A, B, E>) -> Option<GExpr<A, B, E>> {
-    match ann_expr.0 {
-        AnnExprF::Expr(expr) => match expr {
-            ExprF::Var { idx } => Some(GExpr(ExprF::Var { idx: idx })),
-            ExprF::App { func, arg } => {
-                let func_conv = convert(*func?)?;
-                let arg_conv = convert(*arg?)?;
-                Some(GExpr(ExprF::App {
-                    func: Box::new(func_conv),
-                    arg: Box::new(arg_conv),
-                }))
-            }
-            ExprF::Lambda {
-                name,
-                param_ty,
-                body,
-            } => {
-                let param_ty_conv = convert(*param_ty?)?;
-                let body_conv = convert(*body?)?;
-
-                Some(GExpr(ExprF::Lambda {
-                    name,
-                    param_ty: Box::new(param_ty_conv),
-                    body: Box::new(body_conv),
-                }))
-            }
-            ExprF::Pi {
-                name,
-                param_ty,
-                ret_ty,
-            } => {
-                let param_ty_conv = convert(*param_ty?)?;
-                let ret_ty = convert(*ret_ty?)?;
-
-                Some(GExpr(ExprF::Pi {
-                    name,
-                    param_ty: Box::new(param_ty_conv),
-                    ret_ty: Box::new(ret_ty),
-                }))
-            }
-
-            ExprF::Type => todo!(),
-            ExprF::Builtin(_) => todo!(),
-            ExprF::Err(..) => todo!(),
+pub fn to_named(expr: &Expr) -> NamedExpr {
+    let expr = match expr.clone().0 {
+        ExprF::Var { idx } => ExprF::Var {
+            idx: VarKind::Idx(idx),
         },
-        AnnExprF::Ann(expr, ty) => todo!(),
-    }
+        ExprF::App { func, arg } => ExprF::App {
+            func: Rc::new(to_named(&func)),
+            arg: Rc::new(to_named(&arg)),
+        },
+        ExprF::Lambda {
+            name,
+            param_ty,
+            body,
+        } => ExprF::Lambda {
+            name: VarKind::Idx(name),
+            param_ty: Rc::new(to_named(&param_ty)),
+            body: Rc::new(to_named(&body)),
+        },
+        ExprF::Pi {
+            name,
+            param_ty,
+            ret_ty,
+        } => ExprF::Pi {
+            name: VarKind::Idx(name),
+            param_ty: Rc::new(to_named(&param_ty)),
+            ret_ty: Rc::new(to_named(&ret_ty)),
+        },
+        ExprF::Type => ExprF::Type,
+        ExprF::Builtin(builtin) => ExprF::Builtin(builtin),
+        ExprF::Err(expr_error, items) => ExprF::Err(
+            expr_error,
+            items.into_iter().map(|x| Rc::new(to_named(&x))).collect(),
+        ),
+    };
+    GExpr(expr)
 }
 
 // TODO: remove parens based on prec and assoc
@@ -164,7 +144,7 @@ impl<T, A, B, E> ExprF<T, A, B, E> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct GExpr<A, B, E>(pub ExprF<Box<GExpr<A, B, E>>, A, B, E>);
+pub struct GExpr<A, B, E>(pub ExprF<Rc<GExpr<A, B, E>>, A, B, E>);
 
 // The string here is for the name hint
 pub type Expr = GExpr<usize, String, Vec<usize>>;
@@ -422,7 +402,7 @@ impl<A, B, E> SpannedGExpr<A, B, E> {
             ExprF::Builtin(builtin) => ExprF::Builtin(builtin),
             ExprF::Err(expr_error, items) => ExprF::Err(expr_error, items),
         };
-        let expr = expr.fmap(|e| Box::new(e.remove_span()));
+        let expr = expr.fmap(|e| Rc::new(e.remove_span()));
         GExpr(expr)
     }
 }
@@ -432,6 +412,7 @@ pub fn traverse_defs(
     path: Vec<usize>,
 ) -> anyhow::Result<either::Either<SpannedNamedExpr, Spanned<String>>> {
     let mut iter = path.into_iter();
+
     let Some(next) = iter.next() else {
         bail!("path was completely empty")
     };

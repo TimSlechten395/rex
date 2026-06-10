@@ -1,0 +1,53 @@
+def Unit: Type := (A: Type) -> A -> A
+def unit: Unit := (A: Type) => (x: A) => x
+
+def Never: Type := (A: Type) -> A
+
+// Natural numbers
+def Nat: Type := (A: Type) -> (A -> A) -> A -> A
+def succ (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => f (n A f x)
+def add (n: Nat) (m: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => m A f (n A f x)
+def pred (n: Nat): Nat := (A: Type) => (f: A -> A) => (x: A) => n ((A -> A) -> A) ((g: (A -> A) -> A) => (h: A -> A) => h (g f)) ((h: A -> A) => x) (unit A)
+def minus (n: Nat) (m: Nat): Nat := m Nat pred n
+
+def Pair (A: Type) (B: Type): Type := (C: Type) -> (A -> B -> C) -> C
+def pair (A: Type) (B: Type) (a: A) (b: B): Pair A B := (C: Type) => (f: A -> B -> C) => f a b
+
+def Sigma (A: Type) (B: A -> Type): Type := (C: Type) -> ((a: A) -> B a -> C) -> C
+def sigma (A: Type) (B: A -> Type) (a: A) (b: B a): Sigma A B := (C: Type) => (f: (a: A) -> B a -> C) => f a b
+
+def Bool: Type := (A: Type) -> A -> A -> A
+def true: Bool := (A: Type) => (t: A) => (f: A) => t
+def false: Bool := (A: Type) => (t: A) => (f: A) => f
+
+
+def Eq (A: Type) (x: A) (y: A): Type := (P: A -> Type) -> P x -> P y
+def refl (A: Type) (x: A): Eq A x x := (P: A -> Type) => (p: P x) => p
+
+// <=
+def Le (n: Nat) (m: Nat): Type := Sigma Nat ((k: Nat) => Eq Nat (add n k) m)
+// >=
+def Ge (n: Nat) (m: Nat): Type := Le m n
+
+
+
+def Either (A: Type) (B: Type): Type := (C: Type) -> (A -> C) -> (B -> C) -> C
+def left (A: Type) (B: Type) (a: A): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => f a
+def right (A: Type) (B: Type) (b: B): Either A B := (C: Type) => (f: A -> C) => (g: B -> C) => g b
+
+def Not (A: Type): Type := A -> Never
+def Dec (A: Type): Type := Either A (Not A)
+def Dec_eq (A: Type) (a: A) (b: A): Type := Dec (Eq A a b)
+
+def inc (x: Sigma Nat ((x: Nat) => Dec (Le x 10))): Nat :=
+    x Nat
+        ((num: Nat) => (smaller_dec: Dec (Le num 10)) => 
+            smaller_dec Nat
+            ((smaller: Le num 10) => succ num)
+                ((not_smaller: Not (Le num 10)) => num)
+        )
+
+def next: Nat := inc (sigma Nat ((num: Nat) => Dec (Le num 10)) 3 (left (Le 3 10) (Not (Le 3 10)) (sigma Nat ((k: Nat) => Eq Nat (add 3 k) 10) 7 (refl Nat 10))))
+// this 6 is the real problem as we do not know it automatically
+def next: Nat := inc (sigma Nat ((num: Nat) => Dec (Le num 10)) next (left (Le next 10) (Not (Le next 10)) (sigma Nat ((k: Nat) => Eq Nat (add next k) 10) (minus 10 next) (refl Nat 10))))
+def next_eq_5: Nat := inc (sigma Nat ((num: Nat) => Dec (Le num 10)) next (left (Le next 10) (Not (Le next 10)) (sigma Nat ((k: Nat) => Eq Nat (add next k) 10) (minus 10 next) (refl Nat 10))))

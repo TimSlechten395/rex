@@ -1,3 +1,7 @@
+// why nbe is faster
+// 1. instead of substituting we just hold a list of variables so there is no need to substitute
+//    directly
+
 use std::rc::Rc;
 
 use crate::data::expr::{Expr, ExprF, GExpr};
@@ -89,18 +93,18 @@ fn quote(level: usize, v: Rc<Value>) -> Expr {
             let var = Rc::new(Value::Neutral(Rc::new(Neutral::Var(level))));
             let body_val = cl.apply(var);
 
-            let param_ty = Box::new(quote(level, ty.clone()));
+            let param_ty = Rc::new(quote(level, ty.clone()));
 
             ExprF::Lambda {
                 name: name.clone(),
                 param_ty,
-                body: Box::new(quote(level + 1, body_val)),
+                body: Rc::new(quote(level + 1, body_val)),
             }
         }
         Value::Pi(name, a, cl) => {
-            let param_ty = Box::new(quote(level, a.clone()));
+            let param_ty = Rc::new(quote(level, a.clone()));
             let var = Rc::new(Value::Neutral(Rc::new(Neutral::Var(level))));
-            let ret_ty = Box::new(quote(level + 1, cl.apply(var)));
+            let ret_ty = Rc::new(quote(level + 1, cl.apply(var)));
 
             ExprF::Pi {
                 name: name.clone(),
@@ -124,8 +128,8 @@ fn quote_neutral(level: usize, n: Rc<Neutral>) -> Expr {
         }
 
         Neutral::App(f, x) => ExprF::App {
-            func: Box::new(quote_neutral(level, f.clone())),
-            arg: Box::new(quote(level, x.clone())),
+            func: Rc::new(quote_neutral(level, f.clone())),
+            arg: Rc::new(quote(level, x.clone())),
         },
     };
     GExpr(expr)

@@ -73,31 +73,31 @@ fn main() -> anyhow::Result<()> {
 
             let (tokens, ast, expr, ty_errors) = compile(code)?;
             if bootstrap {
-                let exprs: Vec<_> = expr
+                let exprs: Vec<(String, Expr)> = expr
                     .0
                     .into_iter()
-                    .map(|x| (x.name, x.val.remove_span()))
+                    .map(|x| (x.name.0, x.val.remove_span()))
                     .collect();
                 let json = serde_json::to_string(&exprs)?;
                 println!("{}", json);
             } else {
-                let msg = find_char(tokens, ast, expr, 119)?;
-                println!("{}", msg);
+                // let msg = find_char(tokens, ast, expr, 119)?;
+                // println!("{}", msg);
 
-                // for GDef { name, ty: _, val } in exprs.0.0.into_iter() {
-                //     let expr = normal_form(val.remove_span());
-                //     println!("{}: {:?}", name, print_expr(expr));
-                //     println!("---------------------------");
-                // }
-                //
-                // for (name, ty_errors) in exprs.1.into_iter() {
-                //     let ty_errors = ty_errors
-                //         .into_iter()
-                //         .map(|err| err.fmap(|(expr, span)| format!("{:?}", span)))
-                //         .collect::<Vec<_>>();
-                //     println!("{}: {:?}", name, ty_errors);
-                //     println!("---------------------------");
-                // }
+                for GDef { name, ty: _, val } in expr.0.into_iter() {
+                    // let expr = weak_head_normal_form(val.remove_span());
+                    println!("{}: {:?}", name.0, print_expr(&val.remove_span()));
+                    println!("---------------------------");
+                }
+
+                for (name, ty_errors) in ty_errors.into_iter() {
+                    let ty_errors = ty_errors
+                        .into_iter()
+                        .map(|err| err.fmap(|(expr, span)| format!("{:?}", span)))
+                        .collect::<Vec<_>>();
+                    println!("{}: {:?}", name, ty_errors);
+                    println!("---------------------------");
+                }
             }
 
             // for res in expr.clone() {
